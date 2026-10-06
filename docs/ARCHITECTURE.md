@@ -2,7 +2,8 @@
 
 `foxcore` owns serial, parsing, UID normalization, dedupe, persistence, replay and TimeSync.
 `foxbridge` is an event consumer and SPORTident live-output gateway, not competition software.
-FoxLive remains unimplemented. The shared CLI is the composition root; its command registration
+M3 adds FoxLive as a sibling event consumer, with the domain contract in [FOXLIVE.md](FOXLIVE.md).
+The shared CLI is the composition root; its command registration
 does not make core event/parser/transport modules depend on bridge logic.
 
 ```mermaid
@@ -66,5 +67,9 @@ Replay uses FoxCore's original path and provenance. Replayed punches are recorde
 unless an operator explicitly supplies `--allow-replay-output`; the guarded bridge replay command
 does not even open the output endpoint. Explicit output replay can duplicate an event already in Fjw.
 
-Future FoxLive must consume core events and reuse its infrastructure. Full SPORTident readout,
-station programming, Fjw competition logic and all M3 functionality are outside this implementation.
+FoxLive will add event-scoped source associations, pure interpretation/scoring, derived results,
+audited configuration and a local FastAPI desk. Core source rows are never rewritten. A persisted
+RUNNING-event cursor separates live restart recovery from explicit historical association. SQLite and
+all API handlers stay on one asyncio owner thread; bounded browser queues never block ingest.
+See FOXLIVE for pre-implementation timing, tie and correction decisions. Full SPORTident readout,
+station programming, Fjw competition logic and all future milestones remain outside this task.
