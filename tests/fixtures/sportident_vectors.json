@@ -1,0 +1,12 @@
+{
+  "provenance": "plengqui/SportidentTinymesh commit 489452b8ed6816d0043f41480dc891eee2dea6fc, RadioUnit/TeensySketches/crc-test/crc-test.ino test2; CRC byte order cross-checked with MeOS/sireader. Published vector, not FoxSuite hardware capture.",
+  "body": "D30D002C000BDF77270E8D27000B70",
+  "crc": "BE71",
+  "frame": "02D30D002C000BDF77270E8D27000B70BE7103",
+  "card_number": 778103,
+  "control_code": 44,
+  "day_pm": 39,
+  "half_day_seconds": 3725,
+  "subsecond": 39,
+  "backup_offset": 2928
+}
