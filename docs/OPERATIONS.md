@@ -1,4 +1,4 @@
-# FoxSuite operations — FoxCore and FoxBridge
+# FoxSuite operations — FoxCore, FoxBridge and FoxLive
 
 ## Windows installation
 
@@ -183,7 +183,7 @@ duplicate Fjw data; Start/Finish and long-running Fjw operation are unvalidated.
 revisit and restart have automated/M1 evidence as documented but were not newly field-tested against
 Fjw in the supplied single-punch observation. Other versions/drivers and event date/week semantics need
 separate validation. The checklist below is for future revalidation/stress testing, not outstanding M2
-transport acceptance. No M3 implementation is included.
+transport acceptance. FoxLive's separate M3 acceptance remains pending; see its checklist below.
 
 - [ ] Connect actual FoxIdentServer; record board/firmware/USB driver versions.
 - [ ] Verify 115200 baud, 8N1, reset/DTR on Windows.
@@ -202,3 +202,77 @@ stdin pipeline is simulator tested; published D3 framing is regression-tested an
 on a POSIX pseudo-terminal. Independent Windows serial validation, real Fox hardware delivery and
 real FjwW SI-C acceptance are user-supplied manual evidence for the tested VSPE configuration.
 Full competition workflows remain untested: see [Fjw integration](FJW_INTEGRATION.md).
+
+## FoxLive startup and administration
+
+Back up the DB/config before opening 0.3.0: additive schema 3 cannot be opened by older M1/M2 binaries.
+Stop other `run`/`bridge run`/`live run` processes before opening the physical base; one writer/owner
+process is supported. FoxLive requires neither FjwW nor a virtual COM pair. Keep `[serial]`, DB and
+TimeSync settings; add:
+
+```toml
+[live]
+host = "127.0.0.1"
+port = 8765
+open_browser = true
+operator = "event desk"
+```
+
+```powershell
+.venv\Scripts\foxsuite --config config\foxsuite.toml live run
+# Offline administration, no serial reader/browser launch:
+.venv\Scripts\foxsuite --db data\live-test.db live run --no-serial --no-browser
+```
+
+Open the configured URL, default `http://127.0.0.1:8765/`. Create an event, choose its IANA timezone
+and PUNCH_START_FINISH or PREDEFINED_START. Add categories, entries and per-event Fox station roles.
+Explicit UID assignment is independent of FoxBridge SI mappings. Optional windows are absolute,
+inclusive instants. Event date is a label, not an implicit midnight filter. Time inputs accept local
+ISO in the event zone or an explicit offset; saved values display a local offset to preserve DST
+folds. Ambiguous/nonexistent naive local times and fractional seconds are rejected. No PC receive
+time is substituted for a bad station time. The event's persisted validation thresholds can be
+configured through the typed event API; defaults are 2020 minimum and 86400s receive skew.
+
+Click RUNNING only after setup. Historical facts already in the DB do not enter automatically.
+Recent punches, unknown tags, station activity, participant state and category standings update via
+WebSocket without reload; open participant history also refreshes. Finished ranks are separate from
+provisional/unranked states. With only CONTROL stations and no FINISH, expect provisional state, not
+an official finished rank. Assign UNKNOWN UID to an existing entry; prior associations recalculate.
+Edit/clear operator status as needed; DNS/DNF/DSQ never derive from lack of finish. Exclude only with
+a reason. CLOSED stops association but permits visibly audited corrections; ARCHIVED is read-only.
+Deactivation retains entries/categories, and no source timestamp editor exists.
+
+```text
+foxsuite --config config/foxsuite.toml live status
+foxsuite --config config/foxsuite.toml live status --event EVENT_ID
+foxsuite --config config/foxsuite.toml live recalculate EVENT_ID
+foxsuite --config config/foxsuite.toml live associate EVENT_ID SOURCE_ID SOURCE_ID
+foxsuite --config config/foxsuite.toml live export-participants EVENT_ID
+foxsuite --config config/foxsuite.toml live export-results EVENT_ID
+```
+
+CLI status is a snapshot of persisted facts/diagnostics, not IPC or a device probe. Browser source is
+the current local reader connection (or OFFLINE MODE), but TimeSync only confirms the last local
+write; inspect firmware `time` JSON before inferring field synchronization. Export writes CSV to stdout (redirect using a UTF-8-capable
+shell; in older Windows PowerShell explicitly choose `Out-File -Encoding utf8`). Browser downloads
+are UTF-8. Import preview reports all row errors; valid import commits atomically without overwrite.
+See [FOXLIVE](FOXLIVE.md) for columns, rules, API and offline simulator procedure.
+
+Ctrl+C stops HTTP/WebSockets, independent TimeSync, core serial and SQLite. Restart keeps the RUNNING
+event/configuration/audit, rebuilds caches and recovers interrupted associations after its cursor.
+Unknown/disabled mappings are diagnostics, not fatal errors. Persistence/source failures are visible
+in health/logs (HTTP writes return 503 for DB errors); stop, repair capacity/permissions and restart.
+Do not ignore a latched processing error or run two readers as a recovery workaround.
+
+Default binding is localhost; M3 has no authentication/RBAC/TLS. Changing `[live].host` to a network
+address explicitly exposes competition data and administration. Use only a trusted local PC; do not
+port-forward. There is no arbitrary-path HTTP file access, CDN or telemetry. Keep a backup of closed
+DB plus TOML; online backup must use SQLite backup API. Participant/results CSV do not contain the
+raw facts, associations or audit and are not a complete backup.
+
+## FoxLive Windows hardware smoke test — not yet performed
+
+Follow the exact 18-step checklist in the hardware/manual smoke section of [FOXLIVE](FOXLIVE.md).
+Use real RFID → FoxIdent → LoRa → base USB → FoxCore → FoxLive (no FoxBridge/Fjw/VSPE required).
+Record Python/app/firmware/Windows/browser versions, COM port, event timezone and test source IDs.
+M1 hardware and M2 SI-C acceptance remain valid evidence for those layers, not FoxLive validation.

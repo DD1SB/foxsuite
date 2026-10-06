@@ -1,4 +1,4 @@
-# SQLite schema, version 2
+# SQLite schema, version 3
 
 One sqlite3 connection belongs to the ingest loop thread. WAL, synchronous FULL, foreign keys and a 5s busy timeout are enabled. Ordered SQL migrations run under BEGIN IMMEDIATE; `schema_migrations(version)` tracks applied IDs. Unknown/future or noncontiguous versions are rejected. Table creation is exclusively migration-driven.
 
@@ -23,7 +23,7 @@ Exact `(scope, source, station_id, sequence, normalized_uid, original_station_ti
 A reboot with identical sequence, UID and timestamp can collide. Firmware exposes no boot/session ID, so perfect disambiguation is impossible. Changing port/source changes identity; use consistent source labels for a base. Duplicates are never deleted. Each replay has a fresh scope and detects retries within that replay without contaminating live identity.
 
 Replay appends rows with original receive times, replayed=1 and original_raw_id provenance. Original
-rows never change. Repeated replay grows the database intentionally. Use one ingest/replay/bridge
+rows never change. Repeated replay grows the database intentionally. Use one ingest/replay/bridge/live
 writer process; SQLite serializes transactions but multi-process event ownership is not implemented.
 
 ## M2 migration
@@ -66,6 +66,48 @@ FoxCore duplicate sources are not emitted even by resend. `sent` is driver/file-
 Changing the target name establishes a distinct delivery identity, not a harmless display rename.
 Keep it stable across port changes. Failed/unmapped rows are retained indefinitely; mapping repairs
 do not trigger automatic resend. Diagnostic status contains last persisted states, not process liveness.
+
+## M3 migration and immutable interpretation boundary
+
+Migrations 1 and 2 are unchanged. Additive migration 3 creates only `live_*` tables/indexes; a genuine
+v2 upgrade test checks preserved raw/punch facts and foreign keys. FoxBridge tables are untouched.
+Back up before opening with 0.3.0: older M1/M2 binaries reject schema 3. No downgrade is implemented.
+
+| Added table | Purpose |
+| --- | --- |
+| live_events | Metadata, lifecycle/timing mode, canonical UTC windows/default start, persisted timestamp guards, source-ID cursor and UTC creation/update times |
+| live_categories | Event code/name/active/display order |
+| live_participants | Event bib/name/category, optional canonical UID/club/predefined start, active flag, optional operator status override, UTC creation/update times |
+| live_event_stations | Event Fox station ID/name/role/enabled/order; no SI codes |
+| live_event_punches | Explicit `(event_id,punch_id)` association FK to immutable FoxCore punch, cached canonical UID for lookup, UTC association time, origin live/recovery/historical |
+| live_punch_interpretations | Derived status, role, participant and reason per association |
+| live_results | Rebuildable typed JSON participant timing/control/status/rank cache |
+| live_manual_exclusions | Event/punch exclusion with mandatory reason and UTC creation time |
+| live_audit_events | UTC operator label/action/entity/before/after/reason history |
+
+`live_one_running` is a partial unique index for one RUNNING event. Event/category code and event/bib
+are unique; `live_active_uid` permits one active canonical UID per event. Composite foreign keys keep
+category/participant/interpretation/result relationships in the same event. Event stations and source
+associations use composite primary keys. `live_event_uid(event_id,uid,punch_id)` supports bounded UID
+history reads; category and audit indexes support bulk rankings/history. All original source indexes
+and duplicate semantics remain unchanged. Different events can reuse UIDs and explicitly associate
+the same immutable source fact; an association itself is never duplicated inside one event.
+
+Source raw/punch commits happen before FoxLive sees a punch. FoxLive commits association/cursor first,
+then interpretation and results. Interrupted derivation is recoverable on restart because that
+relationship is durable. Startup recalculates existing RUNNING associations and catches up only IDs
+after its cursor, skipping replay copies. Startup does not emit historical punch notifications.
+Starting/resuming snapshots the maximum source ID; CLOSED/ARCHIVED never auto-associate. An explicit
+historical association operation is audited, transactionally validated and idempotent, with no source
+insertion. Recalculation never invokes the append-only core replay function.
+
+Interpretations/results are caches derived from event configuration, associations, immutable facts,
+manual statuses and exclusions. Full calculation is deterministic; source time then ID determines
+first timing/control visits. Sporting ties remain equal-rank; display bib/ID do not break them.
+DNS/DNF/DSQ preserve data but are unranked. Administrative updates and recalculation/audit commit
+atomically. UID/category/status/station/lifecycle/exclusion history is retained; post-close actions
+carry an `after_close:` audit prefix. No destructive participant/category/event deletion exists:
+deactivate or archive. A reasoned exclusion is not deletion of a source punch.
 
 ## Backup
 

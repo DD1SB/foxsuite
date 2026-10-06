@@ -2,13 +2,14 @@
 
 FoxSuite is the offline PC-side suite for FoxIdent field stations and the FoxIdentServer USB base.
 M1 provides shared `foxcore` infrastructure. M2 implements `foxbridge`, a minimal SPORTident live
-compatibility gateway for FjwW; it does not replace Fjw competition software.
+compatibility gateway for FjwW. M3 adds `foxlive`, a standalone local competition desk. Neither
+application replaces the complete Fjw software suite.
 
 FoxBridge: Milestone 2 complete; FjwW SI-C compatibility manually validated on the tested Windows/VSPE setup.
 
 Full FjwW competition workflow not tested.
 
-FoxLive: not implemented yet
+FoxLive: M3 implemented and automatically tested; physical hardware/manual validation pending.
 
 Runner RFID → FoxIdent → LoRa → FoxIdentServer → USB → foxcore → FoxBridge → COM pair → FjwW SI-C.
 
@@ -17,7 +18,9 @@ raw-first SQLite persistence/migrations, retained duplicates, mapping foundation
 TimeSync, replay, simulator and CLI. Its physical hardware acceptance was supplied by the user.
 M2 adds explicit UID/SI-card and station/control mappings, extended D3 AUTOSEND encoding, explicit
 timezone handling, serial/binary-capture output and persistent delivery audit/idempotency.
-No scoring, rankings, categories, competition UI, cloud or telemetry exists.
+M3 adds event-scoped categories, registration/UID assignment, station roles, deterministic timing and
+distinct-controls/time rankings, corrections/audit, CSV and an offline local browser desk. FoxLive is
+a sibling consumer of FoxCore, not a FoxBridge client. No cloud, telemetry, CDN or frontend build exists.
 
 ## Installation and configuration
 
@@ -89,6 +92,36 @@ when mappings exist. CLI simulation uses current PC time; `simulate --timestamp 
 fixed fixtures. Review [SPORTident evidence](docs/SPORTIDENT.md), [Fjw integration](docs/FJW_INTEGRATION.md)
 and [M2 validation](docs/M2_VALIDATION.md) before connecting a real competition event.
 
+## FoxLive
+
+```sh
+foxsuite --config config/foxsuite.toml live run
+foxsuite --db data/live-test.db live run --no-serial --no-browser
+foxsuite --config config/foxsuite.toml live status
+foxsuite --config config/foxsuite.toml live recalculate EVENT_ID
+foxsuite --config config/foxsuite.toml live export-results EVENT_ID
+foxsuite --config config/foxsuite.toml live export-participants EVENT_ID
+```
+
+Open `http://127.0.0.1:8765/` (configurable). Create an event with an explicit IANA timezone and timing
+mode, add categories/participants/UIDs and CONTROL/START/FINISH stations, then start the event.
+Only one event can be RUNNING. CLOSED stops new live association but permits audited corrections;
+ARCHIVED is read-only. Old events are retained. Stop other serial readers before `live run`.
+
+PUNCH_START_FINISH uses the earliest valid START and first FINISH at/after it. PREDEFINED_START uses
+participant start, else event mass/default start. Controls count once; revisits and FoxCore retries
+remain visible but do not add points. Finished results rank by controls descending then elapsed
+seconds ascending, per category; exact ties use 1,2,2,4. Unfinished/DNS/DNF/DSQ are not ranked as
+finishers. Unknown UID assignment and reasoned exclusion recalculate interpretation only: source
+punches/timestamps are never edited, deleted or duplicated by FoxLive.
+
+Browser administration includes CSV preview/atomic import, exports, history, audit and explicit
+historical source-ID association. Recalculation never calls the append-only FoxCore raw replay.
+WebSockets signal snapshot refreshes; no browser refresh is needed for new punches or ranking changes.
+M3 assumes one trusted local operator process; non-local binding has no authentication and is unsafe
+on untrusted networks. Back up the DB and TOML before upgrading to migration 3; older binaries reject it.
+See [FoxLive](docs/FOXLIVE.md) for complete rules, offline test workflow, API and Windows smoke checklist.
+
 ## Development and architecture
 
 ```sh
@@ -99,13 +132,19 @@ mypy
 python -m build
 ```
 
-Tests require no hardware. [Protocol](docs/PROTOCOL.md) separates source facts, discrepancies and assumptions. [Architecture](docs/ARCHITECTURE.md) covers concurrency; [database](docs/DATABASE.md) covers migrations/recovery/dedupe; [operations](docs/OPERATIONS.md) includes the hardware checklist.
+Tests require no hardware. M3 handoff: 163 tests pass on Python 3.12/3.13; lint, formatting, strict
+typing, sdist/wheel and clean offline installed-package HTTP/WebSocket/simulator smoke pass. All 518
+reference hashes remain unchanged. See [FoxLive validation](docs/FOXLIVE.md) for evidence boundaries.
+[Protocol](docs/PROTOCOL.md) separates source facts, discrepancies and assumptions.
+[Architecture](docs/ARCHITECTURE.md) covers concurrency; [database](docs/DATABASE.md) covers
+migrations/recovery/dedupe; [operations](docs/OPERATIONS.md) includes the hardware checklist.
 
 Repository: read-only `reference/`; shared `src/foxcore/`; gateway `src/foxbridge/` (config, mapping,
-encoder/time, delivery persistence/service, output and CLI); hardware-free `tests/` with a published
-protocol vector; `config/`; `docs/`. Flat modules avoid empty or speculative future packages.
+encoder/time, delivery persistence/service, output and CLI); standalone `src/foxlive/` (domain,
+scoring, persistence, service, CSV, API, CLI, local templates/assets); hardware-free `tests/` with a
+published protocol vector; `config/`; `docs/`. Flat modules avoid speculative future packages.
 
 M2 transport acceptance is closed; full competition semantics, Start/Finish and long-running Fjw field
 operation remain unvalidated. Serial write is not receiver acknowledgement, and explicit resend/replay
-can duplicate competition data. FoxLive/M3 remains unstarted and requires explicit approval.
-Future consumers must reuse FoxCore infrastructure.
+can duplicate competition data. FoxLive is implemented but its hardware/browser desk acceptance and
+long-running Windows field operation are still pending. No M4 work has been started.

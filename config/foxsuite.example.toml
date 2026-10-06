@@ -39,3 +39,9 @@ maximum_receive_skew_seconds = 86400.0
 
 [bridge.mapping]
 auto_allocate_si_numbers = false # Explicit persistent UID mappings are required
+
+[live]
+host = "127.0.0.1" # Local event PC only; network exposure is not secured in M3
+port = 8765
+open_browser = true
+operator = "local operator" # Audit label, not authentication

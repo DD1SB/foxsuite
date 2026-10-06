@@ -118,4 +118,5 @@ reservation identity; changing the physical source label changes FoxCore's dedup
 a newly received old retry through. No history is scanned automatically. One bridge writer per
 DB/target is supported. Status is last persisted state rather than a liveness probe.
 
-FoxLive, scoring and Milestone 3 have not been started.
+At this M2 closure, FoxLive/scoring/M3 had not been started. Subsequent M3 implementation and its
+separate validation boundary are documented in [FOXLIVE.md](FOXLIVE.md); M2 acceptance above is unchanged.
