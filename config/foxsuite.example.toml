@@ -1,0 +1,21 @@
+[serial]
+port = "COM4"
+baud_rate = 115200
+reconnect_interval_seconds = 2.0
+
+[database]
+path = "data/foxsuite.db"
+
+[time_sync]
+enabled = true
+on_connect = true
+interval_seconds = 60.0
+command_template = "TIME {unix}\n"
+
+[logging]
+level = "INFO"
+
+[validation]
+# Warn only; preserve original timestamp.
+minimum_unix_timestamp = 1577836800
+

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foxsuite"
+version = "0.1.0"
+description = "Offline FoxIdentServer infrastructure (Milestone 1)"
+requires-python = ">=3.12"
+dependencies = ["pyserial>=3.5,<4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff", "mypy", "types-pyserial", "build"]
+
+[project.scripts]
+foxsuite = "foxcore.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+
