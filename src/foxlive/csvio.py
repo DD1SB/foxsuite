@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from .models import EntryData
+from .scoring import DistinctControlsThenTime
 from .service import LiveService
 
 HEADERS = ["start_number", "first_name", "last_name", "category", "uid", "club", "start_time"]
@@ -84,13 +85,6 @@ def import_participants(service: LiveService, event_id: int, text: str) -> dict[
     return {"valid": True, "count": summary["count"], "errors": []}
 
 
-def safe_cell(value: Any) -> Any:
-    # Spreadsheet formula injection is not needed for a local desk, but exports should be safe.
-    return (
-        "'" + value if isinstance(value, str) and value.startswith(("=", "+", "-", "@")) else value
-    )
-
-
 def export(service: LiveService, event_id: int, results: bool = False) -> str:
     service.repo.event(event_id)
     categories = {c.id: c.code for c in service.repo.categories(event_id)}
@@ -113,7 +107,7 @@ def export(service: LiveService, event_id: int, results: bool = False) -> str:
                 "elapsed_time",
             ]
         )
-        for result in service.repo.results(event_id):
+        for result in DistinctControlsThenTime().calculate(service.repo.results(event_id)):
             entry = entries[result.participant_id]
             start = (
                 datetime.fromtimestamp(result.start, UTC).isoformat()
@@ -127,7 +121,7 @@ def export(service: LiveService, event_id: int, results: bool = False) -> str:
             )
             writer.writerow(
                 [
-                    safe_cell(v)
+                    v
                     for v in [
                         result.rank if result.rank is not None else "",
                         entry.start_number,
@@ -148,7 +142,7 @@ def export(service: LiveService, event_id: int, results: bool = False) -> str:
         for entry in entries.values():
             writer.writerow(
                 [
-                    safe_cell(v)
+                    v
                     for v in [
                         entry.start_number,
                         entry.first_name,

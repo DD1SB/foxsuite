@@ -10,6 +10,8 @@ from pathlib import Path
 
 from foxbridge.cli import execute as execute_bridge
 from foxbridge.cli import register_parser
+from foxlive.cli import execute as execute_live
+from foxlive.cli import register_parser as register_live_parser
 
 from .config import Config, load_config
 from .errors import error_message
@@ -68,7 +70,7 @@ async def manual_time(config: Config, store: Store) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="FoxSuite infrastructure and FoxBridge")
+    parser = argparse.ArgumentParser(description="FoxSuite: FoxCore, FoxBridge and FoxLive")
     parser.add_argument("--config", type=Path)
     parser.add_argument("--db", type=Path, help="Override database path")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -85,6 +87,7 @@ def main() -> None:
     sim.add_argument("--interval", type=float, default=0)
     sim.add_argument("--timestamp", type=int, help="Unix seconds; defaults to current PC time")
     register_parser(sub)
+    register_live_parser(sub)
     args = parser.parse_args()
     try:
         if args.command == "simulate":
@@ -95,6 +98,10 @@ def main() -> None:
             level=config.logging_level, format="%(asctime)s %(levelname)s %(name)s %(message)s"
         )
         log.info("FoxSuite startup")
+        if args.command == "live":
+            execute_live(args, config)
+            log.info("FoxSuite shutdown")
+            return
         store = Store(args.db or config.database_path)
         try:
             log.info("Database path=%s version=%s", args.db or config.database_path, store.version)

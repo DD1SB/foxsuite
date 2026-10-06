@@ -2,7 +2,7 @@
 
 from datetime import UTC, date, datetime
 from enum import StrEnum
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -169,6 +169,8 @@ def instant(value: str | None, timezone: str) -> str | None:
                 )
             parsed = candidates.pop()
         return parsed.astimezone(UTC).isoformat()
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Unknown IANA timezone: {timezone}") from exc
     except (TypeError, OverflowError) as exc:
         raise ValueError("Invalid ISO timestamp") from exc
 
@@ -179,7 +181,10 @@ def unix(value: str | None) -> int | None:
 
 def validate_event(data: EventData) -> EventData:
     date.fromisoformat(data.date)
-    ZoneInfo(data.timezone)
+    try:
+        ZoneInfo(data.timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Unknown IANA timezone: {data.timezone}") from exc
     if not data.name.strip():
         raise ValueError("Event name cannot be blank")
     values = {

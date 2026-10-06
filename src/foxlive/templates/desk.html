@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FoxLive — {% if snapshot.event %}{{ snapshot.event.name }}{% else %}Local event desk{% endif %}</title>
+  <link rel="stylesheet" href="/static/desk.css"><script src="/static/desk.js" defer></script>
+</head>
+<body>
+<header><div><h1>FoxLive</h1><p>Local competition desk · source facts stay immutable</p></div>
+  <label>Event <select id="event-select"><option value="">No event</option>
+    {% for event in snapshot.events %}<option value="{{ event.id }}">{{ event.name }} — {{ event.state }}</option>{% endfor %}
+  </select></label></header>
+<div id="error" role="alert" hidden></div>
+<section class="bar"><span id="event-state">Loading…</span><span id="connection">Source: unknown</span>
+  <span id="sync">TimeSync: unknown</span><span id="clock"></span><span id="socket">Updates: connecting</span></section>
+<nav><a href="#dashboard">Dashboard</a><a href="#administration">Administration</a><a href="#participants">Participants</a>
+  <a href="#stations">Stations</a><a href="#audit">Audit</a></nav>
+<main>
+<section id="dashboard"><h2 id="event-title">{% if snapshot.event %}{{ snapshot.event.name }}{% else %}Create an event to begin{% endif %}</h2>
+  <p id="event-description"></p><div class="columns"><article><h3>Recent punches</h3><div id="recent"></div></article>
+  <article><h3>Unknown tags</h3><p>Assign an unknown UID to an existing participant below; history recalculates immediately.</p><div id="unknown"></div></article></div>
+  <h3>Category standings</h3><div id="rankings"></div>
+</section>
+<section id="detail" hidden><h2>Participant / punch detail</h2><button id="close-detail" type="button">Close detail</button><div id="detail-body"></div></section>
+<section id="administration"><h2>Event administration</h2><p>Changes are audited. Archived events are read-only. No source timestamps can be edited.</p>
+<form id="event-form"><input name="id" type="hidden"><h3>Create / edit event</h3>
+ <label>Name <input name="name" required maxlength="200"></label><label>Date <input name="date" type="date" required></label>
+ <label>Timezone <input name="timezone" value="Europe/Berlin" required></label>
+ <label>Timing <select name="timing_mode"><option>PUNCH_START_FINISH</option><option>PREDEFINED_START</option></select></label>
+ <label>Window start <input name="competition_start_at" data-instant placeholder="2026-10-06T13:00:00+02:00"></label>
+ <label>Window end <input name="competition_end_at" data-instant placeholder="Local ISO time or explicit offset"></label>
+ <label>Default start <input name="default_start_at" data-instant placeholder="Local ISO time or explicit offset"></label>
+ <label>Description <input name="description" maxlength="2000"></label><button>Save event</button><button id="new-event" type="button">New event</button>
+</form>
+<div class="actions"><button data-state="RUNNING">Start / resume</button><button data-state="CLOSED">Close event</button>
+ <button data-state="ARCHIVED">Archive</button><button id="recalculate">Recalculate</button></div>
+<form id="category-form"><h3>Category</h3><input name="id" type="hidden"><label>Code <input name="code" required maxlength="30"></label>
+ <label>Name <input name="display_name" required></label><label>Order <input name="display_order" type="number" value="0"></label>
+ <label>Active <input name="active" type="checkbox" checked></label><button>Save category</button></form><div id="categories"></div>
+<form id="import-form"><h3>Participant CSV</h3><p>Required: start_number,first_name,last_name,category. Optional: uid,club,start_time. UTF-8; atomic import, no overwrite.</p>
+ <input id="csv-file" type="file" accept=".csv,text/csv"><textarea name="text" rows="4" placeholder="start_number,first_name,last_name,category,uid,club,start_time"></textarea>
+ <button name="action" value="preview">Validate / preview</button><button name="action" value="commit">Import valid file</button></form><pre id="import-summary"></pre>
+<div class="actions"><a id="export-participants" href="#">Export participants CSV</a><a id="export-results" href="#">Export results CSV</a></div>
+<form id="associate-form"><h3>Explicit historical source association</h3><p>Use existing source IDs, not replay copies. No new punch is created.</p>
+ <label>IDs (comma-separated) <input name="punch_ids" required></label><button>Associate and recalculate</button></form>
+<button id="source-list" type="button">Show recent source IDs</button><pre id="source-summary"></pre>
+</section>
+<section id="participants"><h2>Participants / UID assignment</h2>
+<form id="participant-form"><input name="id" type="hidden"><label>Bib <input name="start_number" type="number" min="1" required></label>
+ <label>First name <input name="first_name" required></label><label>Last name <input name="last_name" required></label>
+ <label>Category <select name="category_id" required></select></label><label>RFID UID <input name="uid"></label>
+ <label>Club <input name="club"></label><label>Predefined start <input name="start_time" data-instant placeholder="Local ISO time or explicit offset"></label>
+ <label>Status override <select name="manual_status"><option value="">Automatic</option><option>REGISTERED</option><option>RUNNING</option>
+ <option>FINISHED</option><option>DNS</option><option>DNF</option><option>DSQ</option></select></label>
+ <label>Active <input name="active" type="checkbox" checked></label><button>Save participant</button><button id="new-participant" type="button">Clear / new</button>
+</form><div id="participant-list"></div>
+</section>
+<section id="stations"><h2>Station configuration and activity</h2>
+<form id="station-form"><label>Fox station ID <input name="station_id" type="number" min="0" max="65535" required></label>
+ <label>Name <input name="display_name" required></label><label>Role <select name="role"><option>CONTROL</option><option>START</option><option>FINISH</option></select></label>
+ <label>Order <input name="display_order" type="number" value="0"></label><label>Enabled <input name="enabled" type="checkbox" checked></label><button>Save station</button>
+</form><div id="station-list"></div></section>
+<section id="audit"><h2>Audit history</h2><button id="load-audit" type="button">Load audit</button><div id="audit-list"></div></section>
+</main><footer>Trusted local PC only. No cloud. Full sporting configuration is the organizer's responsibility.</footer>
+</body></html>
