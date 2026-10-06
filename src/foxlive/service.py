@@ -1,0 +1,484 @@
+"""Event administration, durable association, audit and derived-only recalculation."""
+
+import json
+import sqlite3
+from collections.abc import Callable
+from typing import Any
+
+from foxcore.events import Punch
+from foxcore.logging import SafeLogger
+from foxcore.protocol import normalize_uid
+
+from .models import (
+    Category,
+    CategoryData,
+    Entry,
+    EntryData,
+    Event,
+    EventData,
+    State,
+    Station,
+    StationData,
+    instant,
+    unix,
+    validate_event,
+)
+from .persistence import LiveRepository, source_punch, timestamp
+from .scoring import DistinctControlsThenTime, interpret
+
+log = SafeLogger(__name__)
+
+
+class LiveService:
+    def __init__(
+        self,
+        repository: LiveRepository,
+        operator: str = "local operator",
+        publish: Callable[[str, int | None, dict[str, Any]], None] | None = None,
+    ) -> None:
+        self.repo = repository
+        self.operator = operator
+        self.publish = publish or (lambda _type, _event, _payload: None)
+        self.failure: Exception | None = None
+
+    def mutable(self, event_id: int) -> Event:
+        event = self.repo.event(event_id)
+        if event.state == State.ARCHIVED:
+            raise ValueError("Archived events are read-only")
+        return event
+
+    def _audit(
+        self, event_id: int, action: str, entity: str, before: Any, after: Any, reason: str = ""
+    ) -> None:
+        if self.repo.event(event_id).state == State.CLOSED:
+            action = "after_close:" + action
+        self.repo.db.execute(
+            "INSERT INTO live_audit_events(event_id,created_at,operator,action,entity,"
+            "before_json,after_json,reason) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                event_id,
+                timestamp(),
+                self.operator,
+                action,
+                entity,
+                json.dumps(before, sort_keys=True),
+                json.dumps(after, sort_keys=True),
+                reason,
+            ),
+        )
+
+    def _insert(self, table: str, values: dict[str, Any]) -> int:
+        cursor = self.repo.db.execute(
+            f"INSERT INTO {table} ({','.join(values)}) VALUES ({','.join('?' for _ in values)})",
+            tuple(values.values()),
+        )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def _update(self, table: str, values: dict[str, Any], entity_id: int) -> None:
+        self.repo.db.execute(
+            f"UPDATE {table} SET {','.join(k + '=?' for k in values)} WHERE id=?",
+            (*values.values(), entity_id),
+        )
+
+    def put_event(self, data: EventData, event_id: int | None = None) -> Event:
+        data = validate_event(data)
+        before = self.mutable(event_id).model_dump(mode="json") if event_id else None
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            values = data.model_dump(mode="json") | {"updated_at": timestamp()}
+            if event_id is None:
+                event_id = self._insert(
+                    "live_events", values | {"state": "DRAFT", "created_at": timestamp()}
+                )
+            else:
+                self._update("live_events", values, event_id)
+            event = self.repo.event(event_id)
+            self._audit(
+                event_id,
+                "event_configuration",
+                str(event_id),
+                before,
+                event.model_dump(mode="json"),
+            )
+            self._calculate(event_id)
+        self.notify(event_id, "event_state_changed")
+        return event
+
+    def transition(self, event_id: int, state: State) -> Event:
+        event = self.mutable(event_id)
+        allowed = {
+            State.DRAFT: {State.RUNNING, State.ARCHIVED},
+            State.RUNNING: {State.CLOSED},
+            State.CLOSED: {State.RUNNING, State.ARCHIVED},
+        }
+        if state == event.state:
+            return event
+        if state not in allowed.get(event.state, set()):
+            raise ValueError(f"Cannot transition {event.state} to {state}")
+        other = self.repo.running()
+        if state == State.RUNNING and other is not None and other.id != event_id:
+            raise ValueError("Cannot start event: another event is already RUNNING")
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            values: dict[str, Any] = {"state": state, "updated_at": timestamp()}
+            if state == State.RUNNING:
+                values["cursor"] = self.repo.db.execute(
+                    "SELECT COALESCE(MAX(id),0) FROM punches"
+                ).fetchone()[0]
+            self._update("live_events", values, event_id)
+            self._calculate(event_id)
+            after = self.repo.event(event_id)
+            self._audit(
+                event_id,
+                "lifecycle",
+                str(event_id),
+                event.model_dump(mode="json"),
+                after.model_dump(mode="json"),
+            )
+        self.notify(event_id, "event_state_changed")
+        return after
+
+    def put_category(
+        self, event_id: int, data: CategoryData, category_id: int | None = None
+    ) -> Category:
+        self.mutable(event_id)
+        current = next((c for c in self.repo.categories(event_id) if c.id == category_id), None)
+        if category_id is not None and current is None:
+            raise ValueError("Category does not exist in this event")
+        if not data.code.strip() or not data.display_name.strip():
+            raise ValueError("Category code/name cannot be blank")
+        try:
+            with self.repo.db:
+                self.repo.db.execute("BEGIN IMMEDIATE")
+                values = data.model_dump(mode="json")
+                if category_id is None:
+                    category_id = self._insert("live_categories", values | {"event_id": event_id})
+                else:
+                    self._update("live_categories", values, category_id)
+                category = next(c for c in self.repo.categories(event_id) if c.id == category_id)
+                self._audit(
+                    event_id,
+                    "category",
+                    str(category_id),
+                    current.model_dump(mode="json") if current else None,
+                    category.model_dump(mode="json"),
+                )
+                self._calculate(event_id)
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"Category code {data.code} already exists") from exc
+        self.notify(event_id, "ranking_changed")
+        return category
+
+    def validate_entry(
+        self, event_id: int, data: EntryData, entry_id: int | None = None
+    ) -> EntryData:
+        event = self.mutable(event_id)
+        if data.category_id not in {c.id for c in self.repo.categories(event_id)}:
+            raise ValueError("Category does not exist in this event")
+        if not data.first_name.strip() or not data.last_name.strip():
+            raise ValueError("Participant names cannot be blank")
+        uid = normalize_uid(data.uid) if data.uid else None
+        start = instant(data.start_time, event.timezone)
+        seconds = unix(start)
+        if seconds is not None and not event.minimum_unix_timestamp <= seconds <= 4294967295:
+            raise ValueError("Predefined start fails event timestamp validation")
+        for entry in self.repo.entries(event_id):
+            if entry.id == entry_id:
+                continue
+            if entry.start_number == data.start_number:
+                raise ValueError(f"Start number {data.start_number} already exists")
+            if uid and data.active and entry.active and entry.uid == uid:
+                raise ValueError(
+                    f"UID {uid} is already assigned to participant {entry.start_number}"
+                )
+        return data.model_copy(update={"uid": uid, "start_time": start})
+
+    def _put_entry(self, event_id: int, data: EntryData, entry_id: int | None = None) -> Entry:
+        current = next((e for e in self.repo.entries(event_id) if e.id == entry_id), None)
+        if entry_id is not None and current is None:
+            raise ValueError("Participant does not exist in this event")
+        values = data.model_dump(mode="json") | {"updated_at": timestamp()}
+        if entry_id is None:
+            entry_id = self._insert(
+                "live_participants", values | {"event_id": event_id, "created_at": timestamp()}
+            )
+        else:
+            self._update("live_participants", values, entry_id)
+        entry = next(e for e in self.repo.entries(event_id) if e.id == entry_id)
+        self._audit(
+            event_id,
+            "participant_uid_category_status",
+            str(entry_id),
+            current.model_dump(mode="json") if current else None,
+            entry.model_dump(mode="json"),
+        )
+        return entry
+
+    def put_entry(self, event_id: int, data: EntryData, entry_id: int | None = None) -> Entry:
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            data = self.validate_entry(event_id, data, entry_id)
+            entry = self._put_entry(event_id, data, entry_id)
+            self._calculate(event_id)
+        self.notify(event_id, "participant_updated", {"participant_id": entry.id})
+        return entry
+
+    def put_station(self, event_id: int, data: StationData) -> Station:
+        self.mutable(event_id)
+        if not data.display_name.strip():
+            raise ValueError("Station name cannot be blank")
+        current = next(
+            (s for s in self.repo.stations(event_id) if s.station_id == data.station_id), None
+        )
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            self.repo.db.execute(
+                "INSERT INTO live_event_stations VALUES (?,?,?,?,?,?) ON CONFLICT(event_id,station_id) "
+                "DO UPDATE SET display_name=excluded.display_name,role=excluded.role,"
+                "enabled=excluded.enabled,display_order=excluded.display_order",
+                (
+                    event_id,
+                    data.station_id,
+                    data.display_name,
+                    data.role,
+                    data.enabled,
+                    data.display_order,
+                ),
+            )
+            station = Station(event_id=event_id, **data.model_dump())
+            self._audit(
+                event_id,
+                "station_configuration",
+                str(data.station_id),
+                current.model_dump(mode="json") if current else None,
+                station.model_dump(mode="json"),
+            )
+            self._calculate(event_id)
+        self.notify(event_id, "station_updated", {"station_id": data.station_id})
+        return station
+
+    def _calculate(self, event_id: int, uid: str | None = None) -> dict[str, int]:
+        event = self.repo.event(event_id)
+        entries = self.repo.entries(event_id)
+        selected = [e for e in entries if uid is None or e.uid == uid]
+        calculation = interpret(
+            event,
+            selected,
+            self.repo.categories(event_id),
+            {s.station_id: (s.role, s.enabled) for s in self.repo.stations(event_id)},
+            self.repo.punches(event_id, uid),
+            self.repo.exclusions(event_id),
+        )
+        for item in calculation.interpretations:
+            self.repo.db.execute(
+                "INSERT INTO live_punch_interpretations VALUES (?,?,?,?,?,?) ON CONFLICT(event_id,punch_id) "
+                "DO UPDATE SET participant_id=excluded.participant_id,status=excluded.status,role=excluded.role,reason=excluded.reason",
+                (event_id, item.punch_id, item.participant_id, item.status, item.role, item.reason),
+            )
+        for result in calculation.results:
+            self.repo.db.execute(
+                "INSERT INTO live_results VALUES (?,?,?) ON CONFLICT(event_id,participant_id) "
+                "DO UPDATE SET payload=excluded.payload",
+                (event_id, result.participant_id, result.model_dump_json()),
+            )
+        existing = self.repo.results(event_id)
+        previous = {r.participant_id: r.model_dump_json() for r in existing}
+        self.repo.db.executemany(
+            "UPDATE live_results SET payload=? WHERE event_id=? AND participant_id=?",
+            [
+                (r.model_dump_json(), event_id, r.participant_id)
+                for r in DistinctControlsThenTime().calculate(existing)
+                if r.model_dump_json() != previous[r.participant_id]
+            ],
+        )
+        return {"source_punches": len(calculation.interpretations)} | calculation.counts
+
+    def recalculate(self, event_id: int) -> dict[str, int]:
+        self.mutable(event_id)
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            counts = self._calculate(event_id)
+            self._audit(event_id, "recalculate", str(event_id), None, counts)
+        self.notify(event_id, "ranking_changed", counts)
+        return counts
+
+    def exclude(self, event_id: int, punch_id: int, reason: str) -> dict[str, int]:
+        self.mutable(event_id)
+        if not reason.strip() or len(reason) > 1000:
+            raise ValueError("Exclusion requires a reason of 1..1000 characters")
+        if not self.repo.db.execute(
+            "SELECT 1 FROM live_event_punches WHERE event_id=? AND punch_id=?", (event_id, punch_id)
+        ).fetchone():
+            raise ValueError("Punch is not associated with this event")
+        before = self.repo.exclusions(event_id).get(punch_id)
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            self.repo.db.execute(
+                "INSERT INTO live_manual_exclusions VALUES (?,?,?,?) ON CONFLICT(event_id,punch_id) "
+                "DO UPDATE SET reason=excluded.reason",
+                (event_id, punch_id, reason.strip(), timestamp()),
+            )
+            self._audit(
+                event_id, "manual_exclusion", str(punch_id), before, reason.strip(), reason.strip()
+            )
+            counts = self._calculate(event_id)
+        self.notify(event_id, "ranking_changed", counts)
+        return counts
+
+    def associate(self, event_id: int, punch_ids: list[int]) -> dict[str, int]:
+        self.mutable(event_id)
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            for punch_id in sorted(set(punch_ids)):
+                punch = self.repo.store.get_punch(punch_id)
+                if punch.replayed:
+                    raise ValueError(
+                        "Associate original source punches, not appended replay copies"
+                    )
+                self.repo.db.execute(
+                    "INSERT OR IGNORE INTO live_event_punches VALUES (?,?,?,?,?)",
+                    (event_id, punch_id, punch.uid, timestamp(), "historical"),
+                )
+            self._audit(
+                event_id, "historical_association", str(event_id), None, sorted(set(punch_ids))
+            )
+            counts = self._calculate(event_id)
+        self.notify(event_id, "ranking_changed", counts)
+        return counts
+
+    def accept(self, punch: Punch) -> None:
+        if punch.id is None or punch.replayed:
+            return
+        try:
+            event = self.repo.running()
+            if event is None or punch.id <= event.cursor:
+                return
+            with self.repo.db:
+                self.repo.db.execute(
+                    "INSERT OR IGNORE INTO live_event_punches VALUES (?,?,?,?,?)",
+                    (event.id, punch.id, punch.uid, timestamp(), "live"),
+                )
+                self.repo.db.execute(
+                    "UPDATE live_events SET cursor=? WHERE id=?", (punch.id, event.id)
+                )
+            with self.repo.db:
+                self._calculate(event.id, punch.uid)
+            self.notify(event.id, "punch_received", {"punch_id": punch.id})
+            self.publish("station_updated", event.id, {"station_id": punch.station_id})
+            self.publish("participant_updated", event.id, {"uid": punch.uid})
+            if (
+                self.repo.db.execute(
+                    "SELECT status FROM live_punch_interpretations WHERE event_id=? AND punch_id=?",
+                    (event.id, punch.id),
+                ).fetchone()[0]
+                == "UNKNOWN_UID"
+            ):
+                self.publish("unknown_uid", event.id, {"uid": punch.uid, "punch_id": punch.id})
+        except Exception as exc:
+            self.failure = exc
+            log.warning("ERROR FoxLive processing failed; source remains stored: %s", exc)
+
+    def recover(self) -> None:
+        event = self.repo.running()
+        if event is None:
+            return
+        # Rebuild already associated facts first; no historic browser punch emissions.
+        with self.repo.db:
+            self._calculate(event.id)
+        for row in self.repo.db.execute(
+            "SELECT * FROM punches WHERE id>? AND replayed=0 ORDER BY id", (event.cursor,)
+        ).fetchall():
+            punch = source_punch(row)
+            assert punch.id is not None
+            with self.repo.db:
+                self.repo.db.execute(
+                    "INSERT OR IGNORE INTO live_event_punches VALUES (?,?,?,?,?)",
+                    (event.id, punch.id, punch.uid, timestamp(), "recovery"),
+                )
+                self.repo.db.execute(
+                    "UPDATE live_events SET cursor=? WHERE id=?", (punch.id, event.id)
+                )
+        with self.repo.db:
+            self._calculate(event.id)
+
+    def notify(self, event_id: int, kind: str, payload: dict[str, Any] | None = None) -> None:
+        self.publish(kind, event_id, payload or {})
+        if kind != "ranking_changed":
+            self.publish("ranking_changed", event_id, {})
+
+    def snapshot(self, event_id: int | None = None) -> dict[str, Any]:
+        events = self.repo.events()
+        running = self.repo.running()
+        if event_id is None:
+            event_id = running.id if running else (events[0].id if events else None)
+        diagnostics: dict[str, Any] = {}
+        for kind in ("connection", "timesync"):
+            row = self.repo.db.execute(
+                "SELECT detail FROM diagnostics WHERE kind=? ORDER BY id DESC LIMIT 1", (kind,)
+            ).fetchone()
+            if row:
+                try:
+                    diagnostics[kind] = json.loads(row[0])
+                except json.JSONDecodeError:
+                    diagnostics[kind] = {"detail": row[0]}
+        base: dict[str, Any] = {
+            "events": [e.model_dump(mode="json") for e in events],
+            "active_event_id": running.id if running else None,
+            "diagnostics": diagnostics,
+            "processing_error": str(self.failure) if self.failure else None,
+            "now": timestamp(),
+            "event": None,
+            "participants": [],
+            "categories": [],
+            "stations": [],
+            "recent": [],
+            "unknown": [],
+            "results": [],
+        }
+        if event_id is None:
+            return base
+        event = self.repo.event(event_id)
+        recent = self.repo.recent(event_id)
+        unknown = [
+            dict(r)
+            for r in self.repo.db.execute(
+                "SELECT p.uid,p.station_id,p.station_timestamp,p.id FROM live_punch_interpretations i JOIN punches p "
+                "ON p.id=i.punch_id WHERE i.event_id=? AND i.status='UNKNOWN_UID' ORDER BY p.station_timestamp DESC,p.id DESC LIMIT 500",
+                (event_id,),
+            )
+        ]
+        activity = {
+            r["station_id"]: dict(r)
+            for r in self.repo.db.execute(
+                "SELECT p.station_id,COUNT(*) AS punch_count,MAX(p.station_timestamp) AS last_time FROM punches p "
+                "JOIN live_event_punches a ON a.punch_id=p.id WHERE a.event_id=? GROUP BY p.station_id",
+                (event_id,),
+            )
+        }
+        latest = {
+            r["station_id"]: dict(r)
+            for r in self.repo.db.execute(
+                "SELECT station_id,callsign,rssi FROM (SELECT p.station_id,p.callsign,p.rssi,"
+                "ROW_NUMBER() OVER (PARTITION BY p.station_id ORDER BY p.station_timestamp DESC,p.id DESC) AS n "
+                "FROM punches p JOIN live_event_punches a ON a.punch_id=p.id WHERE a.event_id=?) WHERE n=1",
+                (event_id,),
+            )
+        }
+        return base | {
+            "event": event.model_dump(mode="json"),
+            "participants": [e.model_dump(mode="json") for e in self.repo.entries(event_id)],
+            "categories": [c.model_dump(mode="json") for c in self.repo.categories(event_id)],
+            "stations": [
+                s.model_dump(mode="json")
+                | activity.get(s.station_id, {})
+                | latest.get(s.station_id, {})
+                for s in self.repo.stations(event_id)
+            ],
+            "recent": recent,
+            "unknown": unknown,
+            "results": [
+                r.model_dump(mode="json")
+                for r in DistinctControlsThenTime().calculate(self.repo.results(event_id))
+            ],
+        }
