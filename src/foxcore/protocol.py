@@ -1,12 +1,11 @@
 """Source-derived FoxIdentServer line parser and normalization."""
 
-from datetime import datetime
 import json
 import re
+from datetime import datetime
 from typing import Any
 
-from .events import (DiagnosticEvent, MalformedLineEvent, Message, Punch,
-                     TagEvent, UnknownJsonEvent)
+from .events import DiagnosticEvent, MalformedLineEvent, Message, Punch, TagEvent, UnknownJsonEvent
 
 
 def normalize_uid(value: str) -> str:
@@ -18,7 +17,7 @@ def normalize_uid(value: str) -> str:
 
 def format_uid(value: str) -> str:
     uid = normalize_uid(value)
-    return ":".join(uid[i:i + 2] for i in range(0, len(uid), 2))
+    return ":".join(uid[i : i + 2] for i in range(0, len(uid), 2))
 
 
 def parse_line(raw: bytes) -> Message:
@@ -51,8 +50,9 @@ def integer(payload: dict[str, Any], name: str, maximum: int) -> int:
     return int(value)
 
 
-def normalize(message: Message, raw_id: int, received: datetime, source: str,
-              replayed: bool, scope: str) -> Punch | None:
+def normalize(
+    message: Message, raw_id: int, received: datetime, source: str, replayed: bool, scope: str
+) -> Punch | None:
     if not isinstance(message, TagEvent):
         return None
     p = message.payload
@@ -64,6 +64,16 @@ def normalize(message: Message, raw_id: int, received: datetime, source: str,
         raise ValueError("Invalid callsign")
     if rssi is not None and type(rssi) is not int:
         raise ValueError("Invalid RSSI")
-    return Punch(raw_id, received, integer(p, "station", 65535),
-                 integer(p, "timestamp", 4294967295), integer(p, "sequence", 65535),
-                 normalize_uid(uid), callsign, rssi, source, replayed, scope)
+    return Punch(
+        raw_id,
+        received,
+        integer(p, "station", 65535),
+        integer(p, "timestamp", 4294967295),
+        integer(p, "sequence", 65535),
+        normalize_uid(uid),
+        callsign,
+        rssi,
+        source,
+        replayed,
+        scope,
+    )

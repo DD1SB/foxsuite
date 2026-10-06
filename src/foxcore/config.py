@@ -1,9 +1,9 @@
 """Typed TOML configuration; relative database paths follow the configuration file."""
 
-from dataclasses import dataclass, field
-from pathlib import Path
 import string
 import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -21,8 +21,11 @@ class TimeSyncConfig:
     command_template: str = "TIME {unix}\n"
 
     def __post_init__(self) -> None:
-        fields = [name for _, name, _, _ in string.Formatter().parse(self.command_template)
-                  if name is not None]
+        fields = [
+            name
+            for _, name, _, _ in string.Formatter().parse(self.command_template)
+            if name is not None
+        ]
         if fields != ["unix"] or not self.command_template.endswith("\n"):
             raise ValueError("Time command must contain one {unix} and end with newline")
         self.command_template.format(unix=1).encode("ascii")
@@ -51,5 +54,10 @@ def load_config(path: Path) -> Config:
     level = data.get("logging", {}).get("level", "INFO").upper()
     if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         raise ValueError("Invalid logging level")
-    return Config(serial, db, TimeSyncConfig(**data.get("time_sync", {})), level,
-                  data.get("validation", {}).get("minimum_unix_timestamp"))
+    return Config(
+        serial,
+        db,
+        TimeSyncConfig(**data.get("time_sync", {})),
+        level,
+        data.get("validation", {}).get("minimum_unix_timestamp"),
+    )

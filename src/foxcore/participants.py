@@ -24,12 +24,16 @@ class ParticipantRepository:
 
     def assign_uid(self, uid: str, participant_id: int) -> None:
         with self.store.db:
-            self.store.db.execute("INSERT INTO participant_uids VALUES (?,?) "
-                                  "ON CONFLICT(uid) DO UPDATE SET participant_id=excluded.participant_id",
-                                  (normalize_uid(uid), participant_id))
+            self.store.db.execute(
+                "INSERT INTO participant_uids VALUES (?,?) "
+                "ON CONFLICT(uid) DO UPDATE SET participant_id=excluded.participant_id",
+                (normalize_uid(uid), participant_id),
+            )
 
     def find_by_uid(self, uid: str) -> Participant | None:
-        row = self.store.db.execute("SELECT p.id,p.name FROM participants p JOIN participant_uids u "
-                                    "ON p.id=u.participant_id WHERE u.uid=?",
-                                    (normalize_uid(uid),)).fetchone()
+        row = self.store.db.execute(
+            "SELECT p.id,p.name FROM participants p JOIN participant_uids u "
+            "ON p.id=u.participant_id WHERE u.uid=?",
+            (normalize_uid(uid),),
+        ).fetchone()
         return Participant(row[0], row[1]) if row else None

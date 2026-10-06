@@ -2,18 +2,22 @@
 
 from collections.abc import Callable
 from datetime import UTC, datetime
-import logging
 
 from .events import Message, Punch
+from .logging import SafeLogger
 from .persistence import RawEvent, Store
 from .protocol import normalize, parse_line
 
-log = logging.getLogger(__name__)
+log = SafeLogger(__name__)
 
 
 class IngestService:
-    def __init__(self, store: Store, parser: Callable[[bytes], Message] = parse_line,
-                 minimum_unix_timestamp: int | None = None) -> None:
+    def __init__(
+        self,
+        store: Store,
+        parser: Callable[[bytes], Message] = parse_line,
+        minimum_unix_timestamp: int | None = None,
+    ) -> None:
         self.store = store
         self.parser = parser
         self.minimum_unix_timestamp = minimum_unix_timestamp
@@ -22,9 +26,15 @@ class IngestService:
     def subscribe(self, callback: Callable[[Punch], None]) -> None:
         self.subscribers.append(callback)
 
-    def ingest(self, raw: bytes, source: str, received: datetime | None = None,
-               replayed: bool = False, scope: str = "live",
-               original_raw_id: int | None = None) -> Punch | None:
+    def ingest(
+        self,
+        raw: bytes,
+        source: str,
+        received: datetime | None = None,
+        replayed: bool = False,
+        scope: str = "live",
+        original_raw_id: int | None = None,
+    ) -> Punch | None:
         timestamp = received or datetime.now(UTC)
         raw_id = self.store.insert_raw(raw, timestamp, source, replayed, scope, original_raw_id)
         return self.process(RawEvent(raw_id, timestamp, raw, source, replayed, scope))
@@ -45,8 +55,10 @@ class IngestService:
         # Separate committed raw record exists even if this transaction fails.
         punch = self.store.finish(raw.id, status, kind, error, punch)
         if punch is not None:
-            if (self.minimum_unix_timestamp is not None and
-                    punch.station_timestamp < self.minimum_unix_timestamp):
+            if (
+                self.minimum_unix_timestamp is not None
+                and punch.station_timestamp < self.minimum_unix_timestamp
+            ):
                 log.warning("raw_id=%s timestamp below configured threshold", raw.id)
             log.debug("normalized raw_id=%s duplicate=%s", raw.id, punch.duplicate)
             for callback in tuple(self.subscribers):
