@@ -1,5 +1,30 @@
 # Changelog
 
+## M3 maintenance — operator UX and EN/DE localization
+
+English-default local desk with immediate English/Deutsch selection and browser-persisted preference.
+Central local JSON catalogs cover normal navigation, forms, tables, states/roles, validation,
+confirmations, unknown tags and CSV help with English fallback; raw diagnostics remain technical.
+Language changes presentation only, never event timezone, stored UTC times, user-entered domain
+content, neutral enums or protocol data.
+
+Start number / Startnummer replaces Bib. Category references are generated automatically and hidden;
+selectors display code – name. Native date/time pickers have localized captions, preserve saved
+absolute instants and require explicit DST-fold choices; gaps are rejected. Timezone is prefilled
+and moved to advanced settings. Historical selection uses meaningful tag/station/time checkboxes,
+not manually entered database IDs.
+
+Read RFID tag captures the next original unassigned live tag, shows station/time and requires
+confirmation before the existing audited participant update. Also supports recent unassigned tags,
+DRAFT registration and advanced manual fallback. Ownership collisions are rejected; replacing a
+participant's tag requires confirmation. Existing event history recalculates without source edits or
+synthetic punches. No schema/domain/scoring/Core/Bridge redesign or new runtime dependencies.
+
+Adds 25 automated cases: 190 pass on Python 3.12 including three Linux Chromium workflows; Python
+3.13 passes 187 with optional browser checks disabled. Ruff lint/format, strict mypy, sdist/wheel,
+clean offline installed-package smoke and all 518 unchanged reference hashes pass. FoxLive physical
+Windows/hardware acceptance remains pending. No M4 work included.
+
 ## 0.3.0 — M3 FoxLive implementation
 
 Adds the standalone offline FoxLive competition desk as a FoxCore sibling consumer, with additive

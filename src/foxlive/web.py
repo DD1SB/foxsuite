@@ -11,6 +11,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -26,7 +28,7 @@ from foxcore.serial import SerialTransport
 from foxcore.service import IngestService
 from foxcore.timesync import TimeSyncService
 
-from . import csvio
+from . import csvio, presentation
 from .config import LiveConfig
 from .models import (
     Category,
@@ -62,6 +64,11 @@ class AssociationInput(Model):
 class CSVInput(Model):
     text: str = Field(max_length=2_000_000)
     commit: bool = False
+
+
+class LocalTimeInput(Model):
+    value: str = Field(max_length=40)
+    timezone: str = Field(max_length=100)
 
 
 class Hub:
@@ -224,10 +231,22 @@ def create_app(
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             if origin and urlparse(origin).netloc != request.headers.get("host"):
                 return JSONResponse(
-                    {"detail": "Cross-origin writes are not permitted"}, status_code=403
+                    {
+                        "detail": presentation.translate(
+                            "error.cross_origin", request.headers.get("accept-language", "en")
+                        )
+                    },
+                    status_code=403,
                 )
             if request.headers.get("content-type", "").split(";")[0] != "application/json":
-                return JSONResponse({"detail": "Use application/json"}, status_code=415)
+                return JSONResponse(
+                    {
+                        "detail": presentation.translate(
+                            "error.json", request.headers.get("accept-language", "en")
+                        )
+                    },
+                    status_code=415,
+                )
         response: Response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -237,20 +256,72 @@ def create_app(
         return response
 
     @app.exception_handler(ValueError)
-    async def invalid(_request: Request, exc: ValueError) -> JSONResponse:
-        return JSONResponse({"detail": str(exc)}, status_code=422)
+    async def invalid(request: Request, exc: ValueError) -> JSONResponse:
+        return JSONResponse(
+            {
+                "detail": presentation.error_text(
+                    str(exc), request.headers.get("accept-language", "en")
+                ),
+                "ui_detail": {
+                    lang: presentation.error_text(str(exc), lang, operator=True)
+                    for lang in ("en", "de")
+                },
+            },
+            status_code=422,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation(request: Request, exc: RequestValidationError) -> Response:
+        lang = presentation.language(request.headers.get("accept-language", "en"))
+        if lang == "en":
+            response = await request_validation_exception_handler(request, exc)
+            detail = json.loads(bytes(response.body))["detail"]
+        else:
+            detail = [
+                {"loc": e["loc"], "type": e["type"], "msg": presentation.validation_text(e, lang)}
+                for e in exc.errors()
+            ]
+        return JSONResponse(
+            {
+                "detail": detail,
+                "ui_detail": {
+                    code: [
+                        {"loc": e["loc"], "msg": presentation.validation_text(e, code)}
+                        for e in exc.errors()
+                    ]
+                    for code in ("en", "de")
+                },
+            },
+            status_code=422,
+        )
 
     @app.exception_handler(sqlite3.DatabaseError)
-    async def storage_error(_request: Request, exc: sqlite3.DatabaseError) -> JSONResponse:
+    async def storage_error(request: Request, exc: sqlite3.DatabaseError) -> JSONResponse:
         log.warning("ERROR FoxLive persistence failed: %s", exc)
         return JSONResponse(
-            {"detail": "Persistence failure; check disk/permissions before continuing"},
+            {
+                "detail": presentation.translate(
+                    "error.storage", request.headers.get("accept-language", "en")
+                )
+            },
             status_code=503,
         )
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
-        return HTMLResponse(templates.get_template("desk.html").render(snapshot=snapshot()))
+        return HTMLResponse(
+            templates.get_template("desk.html").render(
+                snapshot=snapshot(), t=presentation.translate
+            )
+        )
+
+    @app.post("/api/ui/local-time")
+    async def local_time(data: LocalTimeInput) -> dict[str, Any]:
+        return {"options": presentation.local_time_options(data.value, data.timezone)}
+
+    @app.get("/api/events/{event_id}/rfid-candidates")
+    async def tags(event_id: int, after_id: int | None = None, limit: int = 20) -> dict[str, Any]:
+        return presentation.rfid_candidates(current().live.repo, event_id, after_id, limit)
 
     @app.get("/api/status")
     async def status(event_id: int | None = None) -> dict[str, Any]:
@@ -363,13 +434,21 @@ def create_app(
         return current().live.repo.audit(event_id)
 
     @app.post("/api/events/{event_id}/import")
-    async def import_csv(event_id: int, data: CSVInput) -> dict[str, Any]:
+    async def import_csv(event_id: int, data: CSVInput, request: Request) -> dict[str, Any]:
         live = current().live
-        return (
+        summary = (
             csvio.import_participants(live, event_id, data.text)
             if data.commit
             else csvio.preview(live, event_id, data.text)
         )
+        lang = request.headers.get("accept-language", "en")
+        for error in summary["errors"]:
+            error["ui_error"] = {
+                code: presentation.error_text(error["error"], code, csv=True, operator=True)
+                for code in ("en", "de")
+            }
+            error["error"] = presentation.error_text(error["error"], lang, csv=True)
+        return summary
 
     @app.get("/api/events/{event_id}/export/{kind}")
     async def export_csv(event_id: int, kind: str) -> Response:

@@ -103,8 +103,17 @@ foxsuite --config config/foxsuite.toml live export-results EVENT_ID
 foxsuite --config config/foxsuite.toml live export-participants EVENT_ID
 ```
 
-Open `http://127.0.0.1:8765/` (configurable). Create an event with an explicit IANA timezone and timing
-mode, add categories/participants/UIDs and CONTROL/START/FINISH stations, then start the event.
+Open `http://127.0.0.1:8765/` (configurable). English is the default; the header's **English / Deutsch**
+selector switches instantly and remembers the language in this browser. This changes presentation
+only, never competition timestamps, event timezone or protocol data. Native date/time pickers include
+localized captions and safe explicit DST choices; the prefilled IANA timezone is in advanced settings
+(existing/saved/browser timezone, Europe/Berlin on appropriately configured German PCs).
+
+Create an event and timing mode, categories with code/name (IDs are automatic), participants by
+**Start number / Startnummer**, and CONTROL/START/FINISH stations. Category dropdowns show code – name.
+Use **Read RFID tag / RFID-Tag einlesen**, punch the tag, review station/time and confirm assignment.
+Recent unassigned tags are selectable; manual UID entry is an advanced fallback. Assigned tags cannot
+be silently moved from another active participant. Then start the event.
 Only one event can be RUNNING. CLOSED stops new live association but permits audited corrections;
 ARCHIVED is read-only. Old events are retained. Stop other serial readers before `live run`.
 
@@ -116,7 +125,8 @@ finishers. Unknown UID assignment and reasoned exclusion recalculate interpretat
 punches/timestamps are never edited, deleted or duplicated by FoxLive.
 
 Browser administration includes CSV preview/atomic import, exports, history, audit and explicit
-historical source-ID association. Recalculation never calls the append-only FoxCore raw replay.
+historical punch selection by tag/station/time (internal references are hidden in normal forms).
+Recalculation never calls the append-only FoxCore raw replay.
 WebSockets signal snapshot refreshes; no browser refresh is needed for new punches or ranking changes.
 M3 assumes one trusted local operator process; non-local binding has no authentication and is unsafe
 on untrusted networks. Back up the DB and TOML before upgrading to migration 3; older binaries reject it.
@@ -132,9 +142,18 @@ mypy
 python -m build
 ```
 
-Tests require no hardware. M3 handoff: 165 tests pass on Python 3.12/3.13; lint, formatting, strict
-typing, sdist/wheel and clean offline installed-package HTTP/WebSocket/simulator smoke pass. All 518
+Tests require no hardware. After the focused M3 operator-UX pass, 190 tests pass on Python 3.12 with
+the optional Chromium checks enabled; Python 3.13 passes 187 with those three optional checks skipped.
+Lint, formatting, strict typing, sdist/wheel and clean offline installed-package
+HTTP/WebSocket/simulator smoke pass. All 518
 reference hashes remain unchanged. See [FoxLive validation](docs/FOXLIVE.md) for evidence boundaries.
+
+The dependency-free browser helper tests use Node.js if available (no npm/build required).
+For the optional real-browser tests, install `.[dev,ui-test]`, provision Chromium once with
+`python -m playwright install chromium`, then run `FOXSUITE_BROWSER_TESTS=1 pytest` (PowerShell:
+`$env:FOXSUITE_BROWSER_TESTS="1"; pytest`). Browsers are development-test dependencies only, not runtime
+requirements; pre-provision their local cache for offline testing. These simulated browser checks
+do not claim physical FoxLive/Windows acceptance.
 [Protocol](docs/PROTOCOL.md) separates source facts, discrepancies and assumptions.
 [Architecture](docs/ARCHITECTURE.md) covers concurrency; [database](docs/DATABASE.md) covers
 migrations/recovery/dedupe; [operations](docs/OPERATIONS.md) includes the hardware checklist.
@@ -146,5 +165,5 @@ published protocol vector; `config/`; `docs/`. Flat modules avoid speculative fu
 
 M2 transport acceptance is closed; full competition semantics, Start/Finish and long-running Fjw field
 operation remain unvalidated. Serial write is not receiver acknowledgement, and explicit resend/replay
-can duplicate competition data. FoxLive is implemented but its hardware/browser desk acceptance and
+can duplicate competition data. FoxLive is implemented but its physical Windows desk acceptance and
 long-running Windows field operation are still pending. No M4 work has been started.

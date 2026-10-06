@@ -224,12 +224,34 @@ operator = "event desk"
 .venv\Scripts\foxsuite --db data\live-test.db live run --no-serial --no-browser
 ```
 
-Open the configured URL, default `http://127.0.0.1:8765/`. Create an event, choose its IANA timezone
-and PUNCH_START_FINISH or PREDEFINED_START. Add categories, entries and per-event Fox station roles.
-Explicit UID assignment is independent of FoxBridge SI mappings. Optional windows are absolute,
-inclusive instants. Event date is a label, not an implicit midnight filter. Time inputs accept local
-ISO in the event zone or an explicit offset; saved values display a local offset to preserve DST
-folds. Ambiguous/nonexistent naive local times and fractional seconds are rejected. No PC receive
+Open the configured URL, default `http://127.0.0.1:8765/`. English is the default; switch **Language:
+English / Deutsch** in the header at any time. This browser remembers the choice for that host/port,
+without login or restarting FoxSuite. Language changes labels and date/time presentation only,
+not user-entered names, persisted UTC timestamps, the event IANA zone, CSV columns or protocol data.
+
+Create an event and choose Start/finish punches or Predefined start time. The advanced timezone is
+prefilled from the selected event, previous saved preference or browser/PC timezone (UTC fallback);
+German PCs configured for Europe/Berlin default accordingly. Verify it once rather than reentering it.
+Date/start/window controls are normal browser pickers, with localized captions. Choose a first/second
+occurrence with explicit offset for DST fall-back; nonexistent spring-forward times are rejected.
+Saved unchanged times preserve their exact instant even on a language switch. Picker chrome follows
+the browser/OS locale, while captions/tables follow FoxLive's selected EN/DE language.
+
+Create categories with code and display name, such as M40 / Männer 40: all internal keys are automatic.
+Participant dropdowns show code – name; use **Start number / Startnummer** (CSV/API `start_number`).
+For RFID assignment, fill names/start number/category, click **Read RFID tag / RFID-Tag einlesen**,
+punch the tag, inspect the detected UID/station/time, then confirm and save. No assignment occurs
+before confirmation. You can also select a recently seen unassigned tag; manual entry/removal is an
+advanced fallback. Existing ownership by another active participant is rejected. For deliberate
+reassignment, clear the old owner's tag first; replacing the target participant's prior tag asks for
+confirmation and records history. Existing event punches are reinterpreted, never duplicated.
+Reading during DRAFT is registration only: the punch remains in FoxCore and does not silently become
+competition data. An outstanding read cancels on event/entry change, connection loss or after two
+minutes. Re-arm it after reconnect. See [FOXLIVE](FOXLIVE.md) for precise boundaries.
+
+RFID assignment is independent of FoxBridge SI mappings. Optional windows are absolute,
+inclusive instants. Event date is a label, not an implicit midnight filter. API/CSV timestamps still
+use ISO 8601. Ambiguous/nonexistent naive API/CSV times and fractional seconds are rejected. No PC receive
 time is substituted for a bad station time. The event's persisted validation thresholds can be
 configured through the typed event API; defaults are 2020 minimum and 86400s receive skew.
 
@@ -258,6 +280,13 @@ shell; in older Windows PowerShell explicitly choose `Out-File -Encoding utf8`).
 are UTF-8. Import preview reports all row errors; valid import commits atomically without overwrite.
 See [FOXLIVE](FOXLIVE.md) for columns, rules, API and offline simulator procedure.
 
+CSV preview presents row-level problems and human-facing category/start-number labels. Column names
+remain `start_number,first_name,last_name,category,uid,club,start_time` for compatibility: `category`
+is the code, `uid` the RFID tag and `start_time` an ISO instant. Expanded technical details may contain
+raw source/database references in English; ordinary registration and historical selection never
+require typing database primary keys. Browser preferences are not part of the SQLite backup; exports
+and backups retain genuine event data independently of the selected UI language.
+
 Ctrl+C stops HTTP/WebSockets, independent TimeSync, core serial and SQLite. Restart keeps the RUNNING
 event/configuration/audit, rebuilds caches and recovers interrupted associations after its cursor.
 Unknown/disabled mappings are diagnostics, not fatal errors. Persistence/source failures are visible
@@ -276,3 +305,7 @@ Follow the exact 18-step checklist in the hardware/manual smoke section of [FOXL
 Use real RFID → FoxIdent → LoRa → base USB → FoxCore → FoxLive (no FoxBridge/Fjw/VSPE required).
 Record Python/app/firmware/Windows/browser versions, COM port, event timezone and test source IDs.
 M1 hardware and M2 SI-C acceptance remain valid evidence for those layers, not FoxLive validation.
+During this test, also switch EN → DE → EN, reload to verify language preference, read/confirm a tag
+in DRAFT registration, decline an assignment once, verify collisions are rejected, and inspect the
+localized date/time and category labels. Automated Linux Chromium checks do not replace this Windows
+physical acceptance test.

@@ -3,5 +3,5 @@ recursive-include config *.toml
 recursive-include docs *.md
 recursive-include src/foxcore *.typed
 recursive-include src/foxbridge *.typed
-recursive-include tests/fixtures *.json
-recursive-include src/foxlive *.typed *.html *.js *.css
+recursive-include tests/fixtures *.json *.js
+recursive-include src/foxlive *.typed *.html *.js *.css *.json
