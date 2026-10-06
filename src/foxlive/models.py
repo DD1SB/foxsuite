@@ -152,6 +152,8 @@ def instant(value: str | None, timezone: str) -> str | None:
         return None
     try:
         parsed = datetime.fromisoformat(value)
+        if parsed.microsecond:
+            raise ValueError("Competition times must use whole seconds")
         zone = ZoneInfo(timezone)
         if parsed.tzinfo is None:
             candidates = {

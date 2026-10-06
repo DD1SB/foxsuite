@@ -135,6 +135,8 @@ def interpret(
             elif role == Role.START:
                 status = IS.REPEAT_START
                 reason = "Predefined start remains authoritative"
+                if result.status == CS.REGISTERED:
+                    result.status = CS.RUNNING
             elif role == Role.FINISH:
                 if result.finish is None:
                     result.finish = time

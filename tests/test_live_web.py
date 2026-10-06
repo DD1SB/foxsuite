@@ -86,6 +86,7 @@ def test_dashboard_crud_unknown_exclusion_and_source_immutable(tmp_path: Path) -
     path = tmp_path / "web.db"
     with TestClient(create_app(path), base_url="http://127.0.0.1") as client:
         assert client.get("/").status_code == 200
+        assert not client.get("/api/status").json()["application"]["serial_enabled"]
         event, category, entry = configure(client)
         root = f"/api/events/{event}"
         html = client.get("/")
@@ -251,16 +252,8 @@ def test_accepted_serial_and_timesync_composition(
 ) -> None:
     from foxcore.serial import FakeTransport
 
-    class Transport(FakeTransport):
-        async def run(self, line: Any, state: Any) -> None:
-            import asyncio
-
-            await self.connect()
-            await state(ConnectionEvent(True, "fake"))
-            await line(b"malformed debug line\n")
-            await asyncio.Event().wait()
-
-    transport = Transport()
+    transport = FakeTransport()
+    transport.input.put_nowait(b"malformed debug line\n")
     monkeypatch.setattr("foxlive.web.SerialTransport", lambda config: transport)
     core = Config(serial=SerialConfig("FAKE"), time_sync=TimeSyncConfig(interval_seconds=60))
     with TestClient(
@@ -277,8 +270,37 @@ def test_accepted_serial_and_timesync_composition(
         assert client.portal is not None
         client.portal.call(ready)
         diagnostics = client.get("/api/status").json()["diagnostics"]
+        assert client.get("/api/status").json()["application"]["source_connected"]
         assert diagnostics["connection"]["connected"] and diagnostics["timesync"]["success"]
         assert transport.commands[0].startswith(b"TIME ") and transport.commands[0].endswith(b"\n")
+        event, _, _ = configure(client)
+        root = f"/api/events/{event}"
+        data = client.get("/api/events").json()[0]
+        for key in ("id", "state", "cursor", "created_at", "updated_at"):
+            del data[key]
+        now = int(datetime.now(UTC).timestamp())
+        data["default_start_at"] = datetime.fromtimestamp(now - 60, UTC).isoformat()
+        request(client, root, data, "PUT")
+        raw = json.dumps(
+            {"type": "tag", "station": 1, "timestamp": now, "sequence": 1, "uid": UID}
+        ).encode()
+
+        async def simulate() -> None:
+            import asyncio
+
+            await transport.input.put(ConnectionEvent(False, "USB unplug"))
+            await transport.input.put(ConnectionEvent(True, "USB reconnect"))
+            await transport.input.put(raw)
+            await transport.input.put(raw)  # Radio retry: retained, never scored twice.
+            async with asyncio.timeout(2):
+                while runtime(client).store.stats()["raw_events"] < 3:
+                    await asyncio.sleep(0.001)
+
+        client.portal.call(simulate)
+        assert len(transport.commands) == 2  # Immediate TimeSync on each connection.
+        statuses = [p["status"] for p in client.get(f"/api/punches?event_id={event}").json()]
+        assert statuses == ["SOURCE_DUPLICATE", "UNKNOWN_UID"]
+        assert len(client.get("/api/status").json()["unknown"]) == 1
     assert not transport.connected
 
 
@@ -291,3 +313,16 @@ def test_live_configuration_and_missing_source(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="serial port"):
         with TestClient(create_app(tmp_path / "missing.db", serial_enabled=True)):
             pass
+
+
+def test_no_telemetry_even_with_export_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Current FastAPI otherwise attempts automatic exporter setup from these variables.
+    # No exporter/SDK is installed or needed; the app must stay offline and non-instrumented.
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://telemetry.invalid")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "unsupported-protocol")
+    with TestClient(
+        create_app(tmp_path / "no-telemetry.db"), base_url="http://127.0.0.1"
+    ) as client:
+        assert client.get("/api/status").status_code == 200

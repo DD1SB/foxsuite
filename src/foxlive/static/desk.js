@@ -1,5 +1,5 @@
 "use strict";
-let snapshot=null, selected=null, refreshTimer=null, refreshing=false, refreshAgain=false;
+let snapshot=null, selected=null, detailId=null, refreshTimer=null, refreshing=false, refreshAgain=false;
 const $=id=>document.getElementById(id);
 const escape=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function error(message){$("error").textContent=message;$("error").hidden=!message;}
@@ -23,13 +23,13 @@ function formData(form){const data={};for(const element of form.elements){if(!el
 function requireEvent(){if(!selected)throw new Error("No selected event.");return `/api/events/${selected}`;}
 function schedule(){clearTimeout(refreshTimer);refreshTimer=setTimeout(refresh,60);}
 async function refresh(){if(refreshing){refreshAgain=true;return;}refreshing=true;const choice=selected;
- try{const next=await api(`/api/status${choice?"?event_id="+choice:""}`);if(choice===selected){snapshot=next;selected=next.event?.id??null;render();}}
+ try{const next=await api(`/api/status${choice?"?event_id="+choice:""}`);if(choice===selected){snapshot=next;selected=next.event?.id??null;render();if(detailId&&!$("detail").hidden)await showDetail(detailId);}}
  catch(e){error(e.message);}finally{refreshing=false;if(refreshAgain){refreshAgain=false;schedule();}}}
 function render(){const s=snapshot,e=s.event;$("event-select").innerHTML=s.events.map(v=>`<option value="${v.id}" ${v.id===selected?"selected":""}>${escape(v.name)} — ${escape(v.state)}</option>`).join("")||"<option>No event</option>";
  $("event-title").textContent=e?.name||"Create an event to begin";$("event-description").textContent=e?.description||"";
  $("event-state").textContent=e?`${e.state} · ${e.timing_mode}${s.active_event_id&&s.active_event_id!==e.id?" · Another event is running":""}`:"No event";
- $("connection").textContent=`Source: ${s.diagnostics.connection?(s.diagnostics.connection.connected?"CONNECTED":"DISCONNECTED"):"unknown"}`;
- $("sync").textContent=`TimeSync: ${s.diagnostics.timesync?(s.diagnostics.timesync.success?"last write OK":"FAILED"):"unknown"}`;
+ $("connection").textContent=`Source: ${s.application.serial_enabled?(s.application.source_connected===null?"connecting":s.application.source_connected?"CONNECTED":"DISCONNECTED"):"OFFLINE MODE"} ${s.application.source_port}`;
+ $("sync").textContent=`TimeSync: ${!s.application.time_sync_enabled?"automatic disabled":s.diagnostics.timesync?(s.diagnostics.timesync.success?"last write OK":"FAILED"):"no recorded write"}`;
  if(s.processing_error)error(`Processing stopped: ${s.processing_error}`);
  const participants=new Map(s.participants.map(p=>[p.id,p]));const categories=new Map(s.categories.map(c=>[c.id,c]));
  const results=new Map(s.results.map(r=>[r.participant_id,r]));
@@ -59,7 +59,7 @@ function render(){const s=snapshot,e=s.event;$("event-select").innerHTML=s.event
 function tick(){if(!snapshot?.event)return;$("clock").textContent=`${snapshot.event.timezone}: ${new Date().toLocaleString(undefined,{timeZone:snapshot.event.timezone})}`;
  document.querySelectorAll("[data-running-start]").forEach(e=>e.textContent=duration(Math.max(0,Math.floor(Date.now()/1000)-Number(e.dataset.runningStart))));}
 function action(callback){return async event=>{event?.preventDefault();error("");try{await callback(event);await refresh();}catch(e){error(e.message);}};}
-$("event-select").onchange=event=>{selected=Number(event.target.value)||null;$("detail").hidden=true;refresh();};
+$("event-select").onchange=event=>{selected=Number(event.target.value)||null;detailId=null;$("detail").hidden=true;refresh();};
 $("event-form").onsubmit=action(async()=>{const data=formData($("event-form")),id=data.id;delete data.id;
  for(const key of["competition_start_at","competition_end_at","default_start_at"])data[key]=data[key]||null;
  if(id){const old=snapshot.events.find(e=>e.id===Number(id));data.minimum_unix_timestamp=old.minimum_unix_timestamp;data.maximum_receive_skew_seconds=old.maximum_receive_skew_seconds;}
@@ -88,14 +88,17 @@ document.body.addEventListener("click",event=>{const b=event.target.closest("but
   for(const key of["id","event_id","created_at","updated_at"])delete data[key];data.uid=b.dataset.uid;
   if(confirm(`Assign UID ${data.uid} to #${data.start_number}? Existing UID mapping/history will be reinterpreted and audited.`))await api(requireEvent()+"/participants/"+participant,data,"PUT");}
  if(b.dataset.exclude){const reason=prompt("Reason to exclude this source interpretation (source stays unchanged):");if(reason)await api(requireEvent()+"/punches/"+b.dataset.exclude+"/exclude",{reason});}
- if(b.dataset.detail){const data=await api(requireEvent()+"/participants/"+b.dataset.detail),p=data.participant,r=data.result;
+ if(b.dataset.detail){detailId=Number(b.dataset.detail);$("detail").hidden=false;await showDetail(detailId);$("detail").scrollIntoView();}
+ })(event);
+});
+async function showDetail(id){const event=selected,data=await api(requireEvent()+"/participants/"+id),p=data.participant,r=data.result;
+ if(event!==selected||detailId!==id)return;
   const category=snapshot.categories.find(c=>c.id===p.category_id);
   $("detail").hidden=false;$("detail-body").innerHTML=`<p>#${p.start_number} ${escape(p.first_name)} ${escape(p.last_name)} · ${escape(p.club)} · category ${escape(category?.code)} · UID ${escape(p.uid)} · ${escape(r.status)} · controls ${r.controls}</p>
   <p>Start ${escape(time(r.start))} · finish ${escape(time(r.finish))} · elapsed ${duration(r.elapsed)}</p>`+table(["Time","Station","Interpretation","Reason","RSSI","Source"],data.history.map(v=>row([
-  escape(time(v.station_timestamp)),escape(v.station_name||v.station_id),escape(v.status),escape(v.reason),escape(v.rssi),`#${v.id} / raw #${v.raw_event_id}`])));$("detail").scrollIntoView();}
- })(event);
-});
-$("close-detail").onclick=()=>{$("detail").hidden=true;};
+  escape(time(v.station_timestamp)),escape(v.station_name||v.station_id),escape(v.status),escape(v.reason),escape(v.rssi),`#${v.id} / raw #${v.raw_event_id}`])));
+}
+$("close-detail").onclick=()=>{detailId=null;$("detail").hidden=true;};
 function connect(){const ws=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/ws`);
  ws.onopen=()=>{$("socket").textContent="Updates: LIVE";schedule();};ws.onmessage=()=>schedule();
  ws.onerror=()=>ws.close();ws.onclose=()=>{$("socket").textContent="Updates: reconnecting";setTimeout(connect,2000);};}

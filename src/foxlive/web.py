@@ -93,6 +93,7 @@ class Runtime:
     ingest: IngestService
     live: LiveService
     hub: Hub
+    source_connected: bool | None = None
 
 
 async def source(runtime: Runtime, core: Config) -> None:
@@ -106,6 +107,7 @@ async def source(runtime: Runtime, core: Config) -> None:
     sync = TimeSyncService(transport, core.time_sync, record)
 
     async def state(event: ConnectionEvent) -> None:
+        runtime.source_connected = event.connected
         runtime.store.diagnostic("connection", json.dumps(asdict(event)))
         runtime.hub.publish("connection_changed", None, {"connection": asdict(event)})
         await sync.connection_changed(event)
@@ -124,8 +126,14 @@ async def source(runtime: Runtime, core: Config) -> None:
         log.warning("ERROR FoxLive source stopped: %s", error_message(exc))
         runtime.hub.publish("connection_changed", None, {"error": error_message(exc)})
     finally:
-        await sync.stop()
-        await transport.disconnect()
+        runtime.source_connected = False
+        try:
+            await sync.stop()
+        except Exception as exc:
+            runtime.live.failure = exc
+            log.warning("ERROR FoxLive TimeSync stopped: %s", error_message(exc))
+        finally:
+            await transport.disconnect()
 
 
 def create_app(
@@ -145,6 +153,17 @@ def create_app(
         if runtime is None:
             raise ValueError("FoxLive is not started")
         return runtime
+
+    def snapshot(event_id: int | None = None) -> dict[str, Any]:
+        owner = current()
+        return owner.live.snapshot(event_id) | {
+            "application": {
+                "serial_enabled": serial_enabled,
+                "source_port": core.serial.port,
+                "source_connected": owner.source_connected,
+                "time_sync_enabled": core.time_sync.enabled and serial_enabled,
+            }
+        }
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -182,7 +201,18 @@ def create_app(
 
     # No Swagger CDN dependencies: use the typed /openapi.json directly if needed.
     app = FastAPI(
-        title="FoxLive", version="0.3.0", lifespan=lifespan, docs_url=None, redoc_url=None
+        title="FoxLive",
+        version="0.3.0",
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        telemetry={
+            "tracing": False,
+            "metrics": False,
+            "logs": False,
+            "operation_spans": False,
+            "auto_configure": False,
+        },
     )
     allowed_hosts = ["localhost", "127.0.0.1", "[::1]", config.host]
     if config.host in {"0.0.0.0", "::"}:
@@ -222,13 +252,11 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
-        return HTMLResponse(
-            templates.get_template("desk.html").render(snapshot=current().live.snapshot())
-        )
+        return HTMLResponse(templates.get_template("desk.html").render(snapshot=snapshot()))
 
     @app.get("/api/status")
     async def status(event_id: int | None = None) -> dict[str, Any]:
-        return current().live.snapshot(event_id)
+        return snapshot(event_id)
 
     @app.get("/api/events", response_model=list[Event])
     async def events() -> list[Event]:
@@ -366,14 +394,10 @@ def create_app(
         queue = runtime.hub.subscribe()
 
         async def send() -> None:
-            await socket.send_json(
-                {
-                    "type": "snapshot",
-                    "version": 1,
-                    "event_id": None,
-                    "payload": runtime.live.snapshot(),
-                }
-            )
+            async with asyncio.timeout(5):
+                await socket.send_json(
+                    {"type": "snapshot", "version": 1, "event_id": None, "payload": snapshot()}
+                )
             while True:
                 message = await queue.get()
                 async with asyncio.timeout(5):

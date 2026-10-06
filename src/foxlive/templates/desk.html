@@ -25,7 +25,7 @@
 <section id="administration"><h2>Event administration</h2><p>Changes are audited. Archived events are read-only. No source timestamps can be edited.</p>
 <form id="event-form"><input name="id" type="hidden"><h3>Create / edit event</h3>
  <label>Name <input name="name" required maxlength="200"></label><label>Date <input name="date" type="date" required></label>
- <label>Timezone <input name="timezone" value="Europe/Berlin" required></label>
+ <label>Timezone <input name="timezone" value="UTC" required></label>
  <label>Timing <select name="timing_mode"><option>PUNCH_START_FINISH</option><option>PREDEFINED_START</option></select></label>
  <label>Window start <input name="competition_start_at" data-instant placeholder="2026-10-06T13:00:00+02:00"></label>
  <label>Window end <input name="competition_end_at" data-instant placeholder="Local ISO time or explicit offset"></label>
@@ -43,7 +43,7 @@
 <div class="actions"><a id="export-participants" href="#">Export participants CSV</a><a id="export-results" href="#">Export results CSV</a></div>
 <form id="associate-form"><h3>Explicit historical source association</h3><p>Use existing source IDs, not replay copies. No new punch is created.</p>
  <label>IDs (comma-separated) <input name="punch_ids" required></label><button>Associate and recalculate</button></form>
-<button id="source-list" type="button">Show recent source IDs</button><pre id="source-summary"></pre>
+<button id="source-list" type="button">Show source IDs (first 100)</button><pre id="source-summary"></pre>
 </section>
 <section id="participants"><h2>Participants / UID assignment</h2>
 <form id="participant-form"><input name="id" type="hidden"><label>Bib <input name="start_number" type="number" min="1" required></label>

@@ -1,4 +1,8 @@
+import csv
+import io
 import json
+import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -384,3 +388,275 @@ def test_sporting_ties_and_statuses() -> None:
         ).rank
         == 1
     )
+
+
+def entry_data(live: LiveService, event: int, entry: int) -> EntryData:
+    return EntryData.model_validate(
+        next(e for e in live.repo.entries(event) if e.id == entry).model_dump(
+            exclude={"id", "event_id", "created_at", "updated_at"}
+        )
+    )
+
+
+def event_data(live: LiveService, event: int) -> EventData:
+    return EventData.model_validate(
+        live.repo.event(event).model_dump(
+            exclude={"id", "state", "cursor", "created_at", "updated_at"}
+        )
+    )
+
+
+def test_event_history_draft_resume_and_historical_uid_reuse(tmp_path: Path) -> None:
+    store, live, ingest, event, _ = setup(tmp_path / "historical.db", Timing.PREDEFINED_START)
+    original = punch(ingest, 1, 1)
+    live.transition(event, State.CLOSED)
+    second = live.put_event(
+        EventData(
+            name="Next",
+            date="2026-10-07",
+            timing_mode=Timing.PREDEFINED_START,
+            default_start_at=datetime.fromtimestamp(STAMP, UTC).isoformat(),
+        )
+    )
+    category = live.put_category(second.id, CategoryData(code="OPEN", display_name="Open"))
+    live.put_entry(
+        second.id,
+        EntryData(
+            start_number=1, first_name="Anna", last_name="Meyer", category_id=category.id, uid=UID
+        ),
+    )
+    # DRAFT does not ingest, and starting does not backfill old source records.
+    ignored = punch(ingest, 2, 2)
+    assert not live.repo.punches(second.id)
+    live.transition(second.id, State.RUNNING)
+    assert not live.repo.punches(second.id)
+    live.put_station(second.id, StationData(station_id=2, display_name="Two", role=Role.CONTROL))
+    punch(ingest, 2, 3)
+    assert len(live.repo.punches(event)) == 1 and len(live.repo.punches(second.id)) == 1
+    live.associate(second.id, [ignored])
+    assert len(live.repo.punches(second.id)) == 2 and live.repo.results(second.id)[0].controls == 1
+    live.transition(second.id, State.CLOSED)
+    live.transition(event, State.RUNNING)
+    assert live.repo.punches(event)[0].id == original and len(live.repo.punches(event)) == 1
+    assert store.stats()["punches"] == 3  # Association/reopening never creates source rows.
+    store.close()
+
+
+def test_uid_reassignment_affects_both_entries_and_preserves_audit(tmp_path: Path) -> None:
+    store, live, ingest, event, first = setup(tmp_path / "uids.db", Timing.PREDEFINED_START)
+    data = entry_data(live, event, first)
+    second = live.put_entry(event, data.model_copy(update={"start_number": 2, "uid": "04AA"}))
+    punch(ingest, 1, 1)
+    punch(ingest, 2, 2, uid="04AA")
+    with pytest.raises(ValueError, match="already assigned"):
+        live.put_entry(event, data.model_copy(update={"uid": "04AA"}), first)
+    assert [r.controls for r in live.repo.results(event)] == [1, 1]
+    live.put_entry(event, data.model_copy(update={"active": False}), first)
+    live.put_entry(
+        event, entry_data(live, event, second.id).model_copy(update={"uid": UID}), second.id
+    )
+    assert [r.controls for r in live.repo.results(event)] == [0, 1]
+    assert statuses(live, event) == ["VALID_CONTROL", "UNKNOWN_UID"]
+    audit = live.repo.audit(event)[0]
+    assert audit["before"]["uid"] == "04AA" and audit["after"]["uid"] == UID
+    assert store.stats()["punches"] == 2
+    store.close()
+
+
+@pytest.mark.parametrize("manual", [CS.DNS, CS.DNF, CS.DSQ, CS.RUNNING, CS.REGISTERED])
+def test_manual_status_override_clear_and_closed_audit(tmp_path: Path, manual: CS) -> None:
+    store, live, ingest, event, entry = setup(tmp_path / "manual.db", Timing.PREDEFINED_START)
+    punch(ingest, 1, 1)
+    punch(ingest, 11, 10)
+    live.transition(event, State.CLOSED)
+    data = entry_data(live, event, entry)
+    live.put_entry(event, data.model_copy(update={"manual_status": manual}), entry)
+    result = live.repo.results(event)[0]
+    assert (
+        result.status == manual
+        and result.rank is None
+        and result.elapsed == 10
+        and result.controls == 1
+    )
+    assert live.repo.audit(event)[0]["action"].startswith("after_close:")
+    live.put_entry(event, data, entry)
+    assert (
+        live.repo.results(event)[0].rank == 1 and live.repo.results(event)[0].status == CS.FINISHED
+    )
+    store.close()
+
+
+def test_window_boundaries_skew_and_station_reconfiguration(tmp_path: Path) -> None:
+    store, live, ingest, event, _ = setup(tmp_path / "window.db", Timing.PREDEFINED_START)
+    config = event_data(live, event).model_copy(
+        update={
+            "competition_start_at": datetime.fromtimestamp(STAMP, UTC).isoformat(),
+            "competition_end_at": datetime.fromtimestamp(STAMP + 10, UTC).isoformat(),
+            "maximum_receive_skew_seconds": 5,
+        }
+    )
+    live.put_event(config, event)
+    punch(ingest, 1, -1)
+    punch(ingest, 1, 0, 2)
+    punch(ingest, 11, 10)
+    punch(ingest, 1, 11, 3)
+    assert statuses(live, event) == [
+        "OUTSIDE_EVENT_WINDOW",
+        "VALID_CONTROL",
+        "VALID_FINISH",
+        "OUTSIDE_EVENT_WINDOW",
+    ]
+    # Preserve original source time; PC receive clock only validates it, never replaces it.
+    source = json.dumps(
+        {"type": "tag", "station": 2, "timestamp": STAMP + 2, "sequence": 9, "uid": UID}
+    ).encode()
+    ingest.ingest(source, "fake", datetime.fromtimestamp(STAMP + 8, UTC))
+    assert statuses(live, event)[-1] == "INVALID_TIMESTAMP"
+    live.put_station(
+        event, StationData(station_id=1, display_name="Disabled", role=Role.CONTROL, enabled=False)
+    )
+    assert live.repo.results(event)[0].controls == 0
+    assert statuses(live, event)[1] == "DISABLED_STATION"
+    store.close()
+
+
+def test_predefined_start_marker_zero_elapsed_and_unfinished_state(tmp_path: Path) -> None:
+    store, live, ingest, event, _ = setup(tmp_path / "marker.db", Timing.PREDEFINED_START)
+    assert live.repo.results(event)[0].status == CS.REGISTERED
+    punch(ingest, 10, 0)
+    assert live.repo.results(event)[0].status == CS.RUNNING
+    assert statuses(live, event) == ["REPEAT_START"]
+    punch(ingest, 11, 0)
+    assert live.repo.results(event)[0].elapsed == 0 and live.repo.results(event)[0].rank == 1
+    store.close()
+
+
+@pytest.mark.parametrize(
+    "start,finish,elapsed",
+    [
+        ("2026-10-06T23:59:58+02:00", "2026-10-07T00:00:03+02:00", 5),
+        ("2026-03-29T01:59:58+01:00", "2026-03-29T03:00:03+02:00", 5),
+        ("2026-10-25T02:59:58+02:00", "2026-10-25T02:00:03+01:00", 5),
+    ],
+)
+def test_source_utc_elapsed_across_midnight_dst(
+    tmp_path: Path, start: str, finish: str, elapsed: int
+) -> None:
+    store, live, ingest, event, _ = setup(tmp_path / "clock.db")
+    for station, iso in [(10, start), (11, finish)]:
+        moment = datetime.fromisoformat(iso).astimezone(UTC)
+        raw = json.dumps(
+            {
+                "type": "tag",
+                "station": station,
+                "sequence": 1,
+                "timestamp": int(moment.timestamp()),
+                "uid": UID,
+            }
+        ).encode()
+        ingest.ingest(raw, "fake", moment)
+    assert live.repo.results(event)[0].elapsed == elapsed
+    assert live.repo.recent(event)[0]["local_time"] == datetime.fromisoformat(finish).isoformat()
+    store.close()
+
+
+def test_replayed_events_ignored_and_historical_association_atomic(tmp_path: Path) -> None:
+    store, live, ingest, event, _ = setup(tmp_path / "replay.db", Timing.PREDEFINED_START)
+    source_id = punch(ingest, 1, 1)
+    raw = store.raw_events()[0]
+    replayed = ingest.ingest(
+        raw.raw_bytes, "replay", raw.received_at, replayed=True, scope="replay-test"
+    )
+    assert replayed is not None and replayed.id is not None
+    assert len(live.repo.punches(event)) == 1
+    with pytest.raises(ValueError, match="original source"):
+        live.associate(event, [source_id, replayed.id])
+    assert len(live.repo.punches(event)) == 1
+    live.accept(replace(store.get_punch(source_id), id=None))
+    assert len(live.repo.punches(event)) == 1
+    store.close()
+
+
+def test_derived_persistence_failure_recovers_durable_association(tmp_path: Path) -> None:
+    store, live, ingest, event, _ = setup(tmp_path / "failure.db", Timing.PREDEFINED_START)
+    store.db.execute(
+        "CREATE TRIGGER fail_live BEFORE INSERT ON live_punch_interpretations BEGIN SELECT RAISE(ABORT,'disk unavailable'); END"
+    )
+    source_id = punch(ingest, 1, 1)
+    assert live.failure is not None and store.get_punch(source_id).uid == UID
+    assert len(live.repo.punches(event)) == 1 and statuses(live, event) == []
+    store.db.execute("DROP TRIGGER fail_live")
+    recovered = LiveService(LiveRepository(store))
+    recovered.recover()
+    assert recovered.repo.results(event)[0].controls == 1
+    assert statuses(recovered, event) == ["VALID_CONTROL"]
+    assert store.stats()["raw_events"] == 1 and store.stats()["punches"] == 1
+    store.close()
+
+
+def test_csv_row_errors_rollback_and_lossless_export(tmp_path: Path) -> None:
+    store, live, _, event, entry = setup(tmp_path / "csv-errors.db")
+    for suffix in [
+        "2,A,B,NOPE\n",
+        "bad,A,B,OPEN\n",
+        "2,A,B,OPEN,EXTRA\n",
+        "2,A,B\n",
+        '2,"unclosed,B,OPEN\n',
+    ]:
+        summary = csvio.import_participants(
+            live, event, "start_number,first_name,last_name,category\n" + suffix
+        )
+        assert not summary["valid"] and summary["errors"]
+        assert len(live.repo.entries(event)) == 1
+    data = entry_data(live, event, entry).model_copy(
+        update={"club": "=literal,not a formula", "first_name": "Anna, Maria"}
+    )
+    live.put_entry(event, data, entry)
+    rows = list(csv.DictReader(io.StringIO(csvio.export(live, event))))
+    assert rows[0]["club"] == data.club and rows[0]["first_name"] == data.first_name
+    # A mid-import DB error rolls back rows and their audits, not only the final summary.
+    before_audit = live.repo.audit(event)
+    store.db.execute(
+        "CREATE TRIGGER fail_second BEFORE INSERT ON live_participants WHEN NEW.start_number=3 BEGIN SELECT RAISE(ABORT,'disk unavailable'); END"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        csvio.import_participants(
+            live, event, "start_number,first_name,last_name,category\n2,A,B,OPEN\n3,C,D,OPEN\n"
+        )
+    assert len(live.repo.entries(event)) == 1 and live.repo.audit(event) == before_audit
+    store.close()
+
+
+def test_snapshot_query_count_not_per_participant(tmp_path: Path) -> None:
+    store, live, _, event, _ = setup(tmp_path / "bulk.db")
+    text = "start_number,first_name,last_name,category\n" + "".join(
+        f"{i},Runner,Example,OPEN\n" for i in range(2, 202)
+    )
+    assert csvio.import_participants(live, event, text)["count"] == 200
+    queries: list[str] = []
+    store.db.set_trace_callback(queries.append)
+    snapshot = live.snapshot(event)
+    store.db.set_trace_callback(None)
+    assert len(snapshot["participants"]) == 201 and len(snapshot["results"]) == 201
+    assert len(queries) < 20  # Bulk dashboard queries independent of entry count.
+    store.close()
+
+
+def test_tied_result_csv_and_elapsed_order(tmp_path: Path) -> None:
+    store, live, ingest, event, entry = setup(tmp_path / "tie-export.db", Timing.PREDEFINED_START)
+    first = entry_data(live, event, entry)
+    for bib, uid in [(2, "04AA"), (3, "04BB"), (4, "04CC")]:
+        live.put_entry(event, first.model_copy(update={"start_number": bib, "uid": uid}))
+    for uid, finish in [(UID, 10), ("04AA", 20), ("04BB", 20), ("04CC", 30)]:
+        punch(ingest, 1, 1, uid=uid)
+        punch(ingest, 11, finish, uid=uid)
+    rows = list(csv.DictReader(io.StringIO(csvio.export(live, event, results=True))))
+    assert [r["rank"] for r in rows] == ["1", "2", "2", "4"]
+    assert [r["start_number"] for r in rows] == ["1", "2", "3", "4"]
+    assert [r["elapsed_time"] for r in rows] == ["10", "20", "20", "30"]
+    store.close()
+
+
+def test_fractional_predefined_time_is_not_silently_truncated() -> None:
+    with pytest.raises(ValueError, match="whole seconds"):
+        instant("2026-10-06T13:00:00.5+02:00", "Europe/Berlin")
