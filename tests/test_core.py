@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from foxcore.config import load_config
+from foxcore.config import SerialConfig, TimeSyncConfig, load_config
 from foxcore.dedupe import duplicate_key
 from foxcore.events import DiagnosticEvent, MalformedLineEvent, Message, TagEvent, UnknownJsonEvent
 from foxcore.participants import ParticipantRepository
@@ -94,6 +94,12 @@ def test_persistence_dedupe_restart_migrations(tmp_path: Path) -> None:
     assert IngestService(store).ingest(messages()[0], "base", NOW).duplicate  # type: ignore[union-attr]
     assert len(store.db.execute("SELECT * FROM schema_migrations").fetchall()) == 1
     assert store.db.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert (
+        store.db.execute(
+            "SELECT COUNT(*) FROM punches p JOIN raw_events r ON r.id=p.raw_event_id"
+        ).fetchone()[0]
+        == 5
+    )
     store.close()
 
 
@@ -171,3 +177,32 @@ def test_config(tmp_path: Path) -> None:
     path.write_text("[serial]\nreconnect_interval_seconds=0\n")
     with pytest.raises(ValueError):
         load_config(path)
+
+
+@pytest.mark.parametrize("interval", [0.0, -1.0, float("nan"), float("inf")])
+def test_invalid_intervals(interval: float) -> None:
+    with pytest.raises(ValueError):
+        TimeSyncConfig(interval_seconds=interval)
+    with pytest.raises(ValueError):
+        SerialConfig(reconnect_interval_seconds=interval)
+
+
+@pytest.mark.parametrize("template", ["TIME\n", "TIME {wrong}\n", "TIME {unix}"])
+def test_invalid_time_templates(template: str) -> None:
+    with pytest.raises(ValueError):
+        TimeSyncConfig(command_template=template)
+
+
+def test_duplicate_identity_independent() -> None:
+    punch = normalize(parse_line(messages()[0]), 1, NOW, "base", False, "live")
+    assert punch is not None
+    assert duplicate_key(punch) == duplicate_key(replace(punch, rssi=-80, callsign="NEW"))
+    for changed in [
+        replace(punch, station_id=2),
+        replace(punch, sequence=3),
+        replace(punch, uid="0001"),
+        replace(punch, station_timestamp=1770000001),
+        replace(punch, source="second base"),
+        replace(punch, scope="replay"),
+    ]:
+        assert duplicate_key(punch) != duplicate_key(changed)

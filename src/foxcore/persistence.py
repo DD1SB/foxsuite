@@ -120,6 +120,7 @@ class Store:
         self, raw_id: int, status: str, kind: str, error: str | None, punch: Punch | None
     ) -> Punch | None:
         with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
             if punch is not None:
                 row = self.db.execute(
                     "SELECT id FROM punches WHERE scope=? AND source=? AND station_id=? "

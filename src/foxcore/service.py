@@ -36,6 +36,9 @@ class IngestService:
         original_raw_id: int | None = None,
     ) -> Punch | None:
         timestamp = received or datetime.now(UTC)
+        if timestamp.tzinfo is None:
+            raise ValueError("Receive time must be timezone aware")
+        timestamp = timestamp.astimezone(UTC)
         raw_id = self.store.insert_raw(raw, timestamp, source, replayed, scope, original_raw_id)
         return self.process(RawEvent(raw_id, timestamp, raw, source, replayed, scope))
 
