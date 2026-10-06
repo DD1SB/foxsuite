@@ -19,3 +19,23 @@ level = "INFO"
 # Warn only; preserve original timestamp.
 minimum_unix_timestamp = 1577836800
 
+[bridge]
+enabled = false
+target = "fjww"
+queue_capacity = 1024
+
+[bridge.output]
+type = "serial" # "file" provides an append-only binary diagnostic capture
+port = "COM9"   # FoxBridge opens this side; FjwW opens the OTHER end, e.g. COM10
+baud_rate = 38400
+reconnect_interval_seconds = 2.0
+path = "data/bridge-capture.bin"
+
+[bridge.sportident]
+timezone = "Europe/Berlin" # Explicit event wall clock, never inferred from the PC
+week_counter = 0
+minimum_unix_timestamp = 1577836800
+maximum_receive_skew_seconds = 86400.0
+
+[bridge.mapping]
+auto_allocate_si_numbers = false # Explicit persistent UID mappings are required

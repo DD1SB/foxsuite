@@ -1,3 +1,5 @@
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,3 +26,16 @@ def test_group_error_unwrap() -> None:
         "tasks", [ValueError("port missing"), ExceptionGroup("nested", [OSError("disk full")])]
     )
     assert error_message(error) == "port missing; disk full"
+
+
+def test_simulator_explicit_timestamp() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "foxcore.cli", "simulate", "--timestamp", "1770000001"],
+        check=True,
+        capture_output=True,
+    )
+    lines = result.stdout.splitlines()
+    assert len(lines) == 7 and lines[0] == lines[1]
+    assert json.loads(lines[0])["timestamp"] == 1770000001
+    assert json.loads(lines[5])["timestamp"] == 1770000001
+    assert json.loads(lines[6])["timestamp"] == 1770000001

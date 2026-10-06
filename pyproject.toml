@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foxsuite"
-version = "0.1.0"
-description = "Offline FoxIdentServer infrastructure (Milestone 1)"
+version = "0.2.0"
+description = "Offline FoxIdent infrastructure and SPORTident live compatibility gateway"
 requires-python = ">=3.12"
-dependencies = ["pyserial>=3.5,<4"]
+dependencies = ["pyserial>=3.5,<4", "tzdata>=2024.1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff", "mypy", "types-pyserial", "build"]
@@ -20,6 +20,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 foxcore = ["py.typed"]
+foxbridge = ["py.typed"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -1,4 +1,4 @@
-"""Operational M1 CLI. No product UI or competition logic."""
+"""FoxSuite operational CLI composition. No product UI or competition logic."""
 
 import argparse
 import asyncio
@@ -7,6 +7,9 @@ import logging
 import sys
 from dataclasses import asdict
 from pathlib import Path
+
+from foxbridge.cli import execute as execute_bridge
+from foxbridge.cli import register_parser
 
 from .config import Config, load_config
 from .errors import error_message
@@ -65,7 +68,7 @@ async def manual_time(config: Config, store: Store) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="FoxSuite M1 infrastructure")
+    parser = argparse.ArgumentParser(description="FoxSuite infrastructure and FoxBridge")
     parser.add_argument("--config", type=Path)
     parser.add_argument("--db", type=Path, help="Override database path")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -80,16 +83,18 @@ def main() -> None:
     sim = sub.add_parser("simulate")
     sim.add_argument("--count", type=int, default=1)
     sim.add_argument("--interval", type=float, default=0)
+    sim.add_argument("--timestamp", type=int, help="Unix seconds; defaults to current PC time")
+    register_parser(sub)
     args = parser.parse_args()
     try:
         if args.command == "simulate":
-            emit(args.count, args.interval)
+            emit(args.count, args.interval, args.timestamp)
             return
         config = load_config(args.config) if args.config else Config()
         logging.basicConfig(
             level=config.logging_level, format="%(asctime)s %(levelname)s %(name)s %(message)s"
         )
-        log.info("FoxSuite M1 startup")
+        log.info("FoxSuite startup")
         store = Store(args.db or config.database_path)
         try:
             log.info("Database path=%s version=%s", args.db or config.database_path, store.version)
@@ -105,7 +110,9 @@ def main() -> None:
                         p.duplicate,
                     )
                 )
-            if args.command in {"db-info", "status"}:
+            if args.command == "bridge":
+                asyncio.run(execute_bridge(args, config, store, service))
+            elif args.command in {"db-info", "status"}:
                 stats = store.stats()
                 if args.command == "status":
                     stats["connectivity_note"] = "last recorded state; not a live device probe"
