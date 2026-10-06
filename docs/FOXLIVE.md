@@ -249,6 +249,8 @@ one local owner/operator, no authentication or network-security claim; full even
 can briefly pause the desk; high-volume/long-running Windows/browser field behavior needs validation;
 CLI source diagnostics/TimeSync writes are last records rather than station acknowledgement; CSV exports
 are not a full audit backup and spreadsheet formula interpretation must be disabled for untrusted text.
+Derived failures latch a visible error and leave pending associations marked in the desk, but do not
+stop FoxCore raw capture or later UID processing. Core raw-storage failure stops ingestion explicitly.
 HTTP has no source insertion/timestamp-edit route. No championship/federation/course/certificate logic
 or future milestone work is included.
 
@@ -256,7 +258,7 @@ or future milestone work is included.
 
 | Gate | Result and boundary |
 | --- | --- |
-| Full pytest | **163 passed** on Python 3.12.3 and 3.13.15: all 122 accepted M1/M2 regressions plus 41 M3 cases |
+| Full pytest | **165 passed** on Python 3.12.3 and 3.13.15: all 122 accepted M1/M2 regressions plus 43 M3 cases |
 | Ruff lint / format | Pass; existing settings unchanged, all 46 Python source/test files formatted |
 | Strict mypy | Pass on both environments, 46 source/test files; strict settings unchanged |
 | JavaScript | Syntax check passes; no Node/frontend build dependency introduced |
@@ -264,7 +266,7 @@ or future milestone work is included.
 | Offline install | Final wheel installs into clean Python 3.12 environment with `--offline --no-index` and downloaded local wheels; all 20 runtime packages compatible |
 | Installed-package smoke | Outside repository: actual localhost HTTP, local assets, WebSocket snapshot, simulator/core raw-first ingest, cursor restart, deterministic recalculation, CSV and graceful Ctrl+C all pass |
 | Source retention | Simulator smoke keeps 7 raw / 2 source punch / 1 transport duplicate; FoxLive has one counted control, no fabricated source records |
-| Upgrade/recovery | Genuine v2→v3 fixture preserves source facts; derived-write failure, mid-CSV rollback, active-event restart and no historical live re-emission covered |
+| Upgrade/recovery | Genuine v2→v3 fixture preserves source facts; derived failure retains capture/association and later UID processing; raw failure stops visibly; CSV rollback, active restart and no historical live re-emission covered |
 | Domain | Both timing modes, pre-sync/skew/window validation, repeat/duplicate distinction, DST/midnight, tie ranks/CSV, category/UID/status/station changes and exclusions covered |
 | Desk/API | Escaped templates, typed CRUD/deactivation, atomic CSV, unknown assignment, history/exclusion, origin/host checks, WebSocket client isolation/resync and fake-source reconnect/TimeSync covered |
 | Offline/no telemetry | Export environment variables do not enable FastAPI telemetry or automatic exporters; also passes installed-package smoke with such variables present |

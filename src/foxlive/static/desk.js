@@ -30,12 +30,12 @@ function render(){const s=snapshot,e=s.event;$("event-select").innerHTML=s.event
  $("event-state").textContent=e?`${e.state} · ${e.timing_mode}${s.active_event_id&&s.active_event_id!==e.id?" · Another event is running":""}`:"No event";
  $("connection").textContent=`Source: ${s.application.serial_enabled?(s.application.source_connected===null?"connecting":s.application.source_connected?"CONNECTED":"DISCONNECTED"):"OFFLINE MODE"} ${s.application.source_port}`;
  $("sync").textContent=`TimeSync: ${!s.application.time_sync_enabled?"automatic disabled":s.diagnostics.timesync?(s.diagnostics.timesync.success?"last write OK":"FAILED"):"no recorded write"}`;
- if(s.processing_error)error(`Processing stopped: ${s.processing_error}`);
+ if(s.processing_error)error(`Processing error: ${s.processing_error}. Inspect source state, repair storage/configuration, then restart/recalculate.`);
  const participants=new Map(s.participants.map(p=>[p.id,p]));const categories=new Map(s.categories.map(c=>[c.id,c]));
  const results=new Map(s.results.map(r=>[r.participant_id,r]));
  $("recent").innerHTML=table(["Local time","Station","Runner","Category","Interpretation","RSSI","Source"],s.recent.map(p=>row([
  escape(time(p.station_timestamp)),escape(p.station_name||p.station_id),p.participant_id?`<button data-detail="${p.participant_id}">#${p.start_number} ${escape(p.first_name)} ${escape(p.last_name)}</button>`:`UNKNOWN ${escape(p.uid)}`,
- escape(p.category),escape(p.status),escape(p.rssi),`#${p.id} <button data-exclude="${p.id}">Exclude</button>`])));
+ escape(p.category),escape(p.status||"PENDING_INTERPRETATION"),escape(p.rssi),`#${p.id} <button data-exclude="${p.id}">Exclude</button>`])));
  $("unknown").innerHTML=table(["UID / source","Station / time","Assign to entry"],s.unknown.map(p=>row([
  `${escape(p.uid)} (#${p.id})`,`${p.station_id} · ${escape(time(p.station_timestamp))}`,
  `<select data-unknown-select="${p.id}">${s.participants.filter(v=>v.active).map(v=>`<option value="${v.id}">#${v.start_number} ${escape(v.first_name)} ${escape(v.last_name)}</option>`).join("")}</select><button data-assign="${p.id}" data-uid="${escape(p.uid)}">Assign</button>`])));

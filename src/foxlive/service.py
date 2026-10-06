@@ -5,6 +5,7 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any
 
+from foxcore.errors import error_message
 from foxcore.events import Punch
 from foxcore.logging import SafeLogger
 from foxcore.protocol import normalize_uid
@@ -426,7 +427,7 @@ class LiveService:
             "events": [e.model_dump(mode="json") for e in events],
             "active_event_id": running.id if running else None,
             "diagnostics": diagnostics,
-            "processing_error": str(self.failure) if self.failure else None,
+            "processing_error": error_message(self.failure) if self.failure else None,
             "now": timestamp(),
             "event": None,
             "participants": [],

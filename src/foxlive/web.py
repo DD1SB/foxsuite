@@ -114,8 +114,6 @@ async def source(runtime: Runtime, core: Config) -> None:
 
     async def line(raw: bytes) -> None:
         runtime.ingest.ingest(raw, "serial:" + core.serial.port)
-        if runtime.live.failure:
-            raise runtime.live.failure
 
     try:
         async with asyncio.TaskGroup() as group:

@@ -132,7 +132,7 @@ mypy
 python -m build
 ```
 
-Tests require no hardware. M3 handoff: 163 tests pass on Python 3.12/3.13; lint, formatting, strict
+Tests require no hardware. M3 handoff: 165 tests pass on Python 3.12/3.13; lint, formatting, strict
 typing, sdist/wheel and clean offline installed-package HTTP/WebSocket/simulator smoke pass. All 518
 reference hashes remain unchanged. See [FoxLive validation](docs/FOXLIVE.md) for evidence boundaries.
 [Protocol](docs/PROTOCOL.md) separates source facts, discrepancies and assumptions.

@@ -108,8 +108,10 @@ FastAPI native telemetry and automatic environment exporter setup are explicitly
 transitive OpenTelemetry API has no enabled instrumentation/exporter; runtime does not send telemetry.
 
 Expected validation errors are concise HTTP 422/CLI ERROR messages. Persistence errors return 503;
-a source/derived ingest failure latches visible health and stops the serial task instead of pretending
-successful ongoing scoring. Repair disk/permissions then restart/recover. Ingest isolates normal
+an error latches visible health instead of pretending successful ongoing scoring. Core raw/database
+failure stops the serial task explicitly. Derived scoring failure does not stop raw capture or later
+subscriber calls: sources/associations remain recoverable, and other UIDs can still process. Repair
+disk/permissions then restart/recover. Ingest isolates normal
 unknown tags/stations as interpretations, not exceptions. SafeLogger protects ingest from log handlers.
 Large operator-triggered recalculation/import is synchronous and may briefly pause desk updates;
 this is deliberately a small single-operator event desk, not a multi-user/distributed service.

@@ -14,10 +14,11 @@ FastAPI/Uvicorn local desk, bounded WebSocket notifications, escaped local HTML/
 atomic UTF-8 CSV preview/import and participant/result export; extended `live` CLI. Restart recovers
 the RUNNING event cursor and caches without treating history as new browser punches. Historical
 source association is explicit and idempotent; appended FoxCore replay copies are ignored.
-M1/M2 regression gates retained: 163 tests pass on Python 3.12/3.13; Ruff lint/format, strict mypy,
+M1/M2 regression gates retained: 165 tests pass on Python 3.12/3.13; Ruff lint/format, strict mypy,
 sdist/wheel, clean offline installed-package HTTP/WebSocket/simulator/restart smoke pass. All 518
 reference hashes unchanged. Details in FOXLIVE.md; physical FoxLive/Windows/browser acceptance is
-pending. Native FastAPI telemetry/environment exporters explicitly disabled. No M4 work included.
+pending. Native FastAPI telemetry/environment exporters explicitly disabled. Derived scoring failure
+never stops raw capture; source-storage failure remains explicit. No M4 work included.
 
 ## M2 closure — successful Windows/FjwW SI-C validation
 

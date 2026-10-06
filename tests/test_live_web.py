@@ -293,7 +293,9 @@ def test_accepted_serial_and_timesync_composition(
             await transport.input.put(raw)
             await transport.input.put(raw)  # Radio retry: retained, never scored twice.
             async with asyncio.timeout(2):
-                while runtime(client).store.stats()["raw_events"] < 3:
+                while (
+                    runtime(client).store.stats()["raw_events"] < 3 or len(transport.commands) < 2
+                ):
                     await asyncio.sleep(0.001)
 
         client.portal.call(simulate)
@@ -326,3 +328,64 @@ def test_no_telemetry_even_with_export_environment(
         create_app(tmp_path / "no-telemetry.db"), base_url="http://127.0.0.1"
     ) as client:
         assert client.get("/api/status").status_code == 200
+
+
+@pytest.mark.parametrize("layer", ["raw", "derived"])
+def test_live_failure_never_conditions_raw_capture_on_scoring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: str
+) -> None:
+    from foxcore.serial import FakeTransport
+
+    transport = FakeTransport()
+    monkeypatch.setattr("foxlive.web.SerialTransport", lambda config: transport)
+    core = Config(serial=SerialConfig("FAKE"), time_sync=TimeSyncConfig(enabled=False))
+    with TestClient(
+        create_app(tmp_path / "failure-source.db", core, serial_enabled=True),
+        base_url="http://127.0.0.1",
+    ) as client:
+        configure(client)
+
+        async def fail_and_receive() -> None:
+            import asyncio
+
+            owner = runtime(client)
+            if layer == "raw":
+                owner.store.db.execute(
+                    "CREATE TRIGGER fail_source BEFORE INSERT ON raw_events BEGIN SELECT RAISE(ABORT,'disk unavailable'); END"
+                )
+            else:
+                owner.store.db.execute(
+                    "CREATE TRIGGER fail_score BEFORE INSERT ON live_punch_interpretations WHEN NEW.punch_id=1 BEGIN SELECT RAISE(ABORT,'bad interpretation'); END"
+                )
+            now = int(datetime.now(UTC).timestamp())
+            for sequence, uid in [(1, UID), (2, "04AA"), (3, "04AA")]:
+                await transport.input.put(
+                    json.dumps(
+                        {
+                            "type": "tag",
+                            "station": 1,
+                            "timestamp": now,
+                            "sequence": sequence,
+                            "uid": uid,
+                        }
+                    ).encode()
+                )
+            async with asyncio.timeout(2):
+                while owner.live.failure is None or (
+                    layer == "derived" and owner.store.stats()["raw_events"] < 3
+                ):
+                    await asyncio.sleep(0.001)
+
+        assert client.portal is not None
+        client.portal.call(fail_and_receive)
+        snapshot = client.get("/api/status").json()
+        assert snapshot["processing_error"]
+        if layer == "raw":
+            assert "disk unavailable" in snapshot["processing_error"]
+            assert not snapshot["application"]["source_connected"]
+            assert client.get("/api/source-punches").json() == []
+        else:
+            assert snapshot["application"]["source_connected"]
+            assert len(client.get("/api/source-punches").json()) == 3
+            assert len(snapshot["unknown"]) == 2  # Later independent UID still interprets.
+            assert len(snapshot["recent"]) == 3  # Including the durable failed association.
