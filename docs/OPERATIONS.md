@@ -17,6 +17,10 @@ Set the COM port shown in Device Manager. Baud defaults to source-verified 11520
 
 Global options go before the subcommand:
 
+Relative TOML database paths resolve beside the TOML file; `--db` resolves relative to the
+working directory. `run --show-punches` logs compact punch summaries for field testing.
+Expected errors print one concise ERROR message; tracebacks require logging level DEBUG.
+
 ```text
 foxsuite --config config/foxsuite.toml run
 foxsuite --db data/demo.db status

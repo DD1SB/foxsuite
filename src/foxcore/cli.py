@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .config import Config, load_config
+from .errors import error_message
 from .events import ConnectionEvent, TimeSyncEvent
 from .logging import SafeLogger
 from .persistence import Store
@@ -22,6 +23,8 @@ log = SafeLogger(__name__)
 
 
 async def run_serial(config: Config, store: Store, service: IngestService) -> None:
+    if not config.serial.port:
+        raise ValueError("Configure a FoxIdentServer serial port in [serial].port")
     transport = SerialTransport(config.serial)
 
     def record(event: TimeSyncEvent) -> None:
@@ -68,6 +71,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
     run.add_argument("--stdin", action="store_true", help="Ingest newline bytes from stdin")
+    run.add_argument("--show-punches", action="store_true", help="Log compact live punches")
     sub.add_parser("status")
     sub.add_parser("db-info")
     sub.add_parser("send-time")
@@ -90,6 +94,17 @@ def main() -> None:
         try:
             log.info("Database path=%s version=%s", args.db or config.database_path, store.version)
             service = IngestService(store, minimum_unix_timestamp=config.minimum_unix_timestamp)
+            if args.command == "run" and args.show_punches:
+                service.subscribe(
+                    lambda p: log.info(
+                        "Punch id=%s station=%s uid=%s time=%s duplicate=%s",
+                        p.id,
+                        p.station_id,
+                        p.uid,
+                        p.station_timestamp,
+                        p.duplicate,
+                    )
+                )
             if args.command in {"db-info", "status"}:
                 stats = store.stats()
                 if args.command == "status":
@@ -113,8 +128,10 @@ def main() -> None:
             log.info("FoxSuite shutdown")
     except KeyboardInterrupt:
         pass
-    except Exception:
-        log.exception("FoxSuite operation failed (persistence errors are fatal)")
+    except Exception as exc:
+        print(f"ERROR {error_message(exc)}", file=sys.stderr)
+        if logging.getLogger().isEnabledFor(logging.DEBUG):
+            log.exception("FoxSuite operation failed")
         raise SystemExit(1)
 
 
