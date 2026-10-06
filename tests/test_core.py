@@ -9,7 +9,7 @@ from foxcore.config import SerialConfig, TimeSyncConfig, load_config
 from foxcore.dedupe import duplicate_key
 from foxcore.events import DiagnosticEvent, MalformedLineEvent, Message, TagEvent, UnknownJsonEvent
 from foxcore.participants import ParticipantRepository
-from foxcore.persistence import Store
+from foxcore.persistence import MIGRATIONS, Store
 from foxcore.protocol import format_uid, normalize, normalize_uid, parse_line
 from foxcore.service import IngestService
 from foxcore.simulator import messages
@@ -88,11 +88,11 @@ def test_persistence_dedupe_restart_migrations(tmp_path: Path) -> None:
     assert duplicate_key(first) != duplicate_key(replace(first, station_timestamp=1))
     store.close()
     store = Store(path)
-    assert store.version == 1
+    assert store.version == len(MIGRATIONS)
     assert store.stats()["raw_events"] == 4
     assert store.stats()["duplicates"] == 1
     assert IngestService(store).ingest(messages()[0], "base", NOW).duplicate  # type: ignore[union-attr]
-    assert len(store.db.execute("SELECT * FROM schema_migrations").fetchall()) == 1
+    assert len(store.db.execute("SELECT * FROM schema_migrations").fetchall()) == len(MIGRATIONS)
     assert store.db.execute("PRAGMA foreign_key_check").fetchall() == []
     assert (
         store.db.execute(

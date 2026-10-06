@@ -30,6 +30,28 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "REFERENCES participants(id))",
         "CREATE TABLE stations (station_id INTEGER PRIMARY KEY, name TEXT NOT NULL, callsign TEXT)",
     ),
+    (
+        "CREATE TABLE bridge_uid_maps (id INTEGER PRIMARY KEY, uid TEXT NOT NULL, "
+        "card_number INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)))",
+        "CREATE UNIQUE INDEX bridge_uid_active ON bridge_uid_maps(uid) WHERE active=1",
+        "CREATE UNIQUE INDEX bridge_card_active ON bridge_uid_maps(card_number) WHERE active=1",
+        "CREATE TABLE bridge_station_maps (id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL, "
+        "control_code INTEGER NOT NULL, role TEXT NOT NULL CHECK(role IN ('CONTROL','START','FINISH')), "
+        "active INTEGER NOT NULL CHECK(active IN (0,1)))",
+        "CREATE UNIQUE INDEX bridge_station_active ON bridge_station_maps(station_id) WHERE active=1",
+        "CREATE TABLE bridge_offsets (target TEXT NOT NULL, control_code INTEGER NOT NULL, "
+        "next_offset INTEGER NOT NULL, PRIMARY KEY(target,control_code))",
+        "CREATE TABLE bridge_deliveries (id INTEGER PRIMARY KEY, punch_id INTEGER NOT NULL "
+        "REFERENCES punches(id), target TEXT NOT NULL, created_at TEXT NOT NULL, finished_at TEXT, "
+        "uid_mapping_id INTEGER REFERENCES bridge_uid_maps(id), station_mapping_id INTEGER "
+        "REFERENCES bridge_station_maps(id), card_number INTEGER, control_code INTEGER, role TEXT, "
+        "backup_offset INTEGER, encoded_frame BLOB, status TEXT NOT NULL, error TEXT, "
+        "output_endpoint TEXT NOT NULL, automatic INTEGER NOT NULL CHECK(automatic IN (0,1)))",
+        "CREATE UNIQUE INDEX bridge_once ON bridge_deliveries(target,punch_id) WHERE automatic=1",
+        "CREATE INDEX bridge_status ON bridge_deliveries(target,status,id)",
+        "CREATE TABLE bridge_output_state (target TEXT PRIMARY KEY, updated_at TEXT NOT NULL, "
+        "endpoint TEXT NOT NULL, connected INTEGER NOT NULL, detail TEXT NOT NULL)",
+    ),
 )
 
 
@@ -87,6 +109,28 @@ class Store:
 
     def close(self) -> None:
         self.db.close()
+
+    def get_punch(self, punch_id: int) -> Punch:
+        """Canonical persisted punch for explicit downstream operations."""
+        row = self.db.execute("SELECT * FROM punches WHERE id=?", (punch_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"Punch {punch_id} does not exist")
+        return Punch(
+            raw_event_id=row["raw_event_id"],
+            received_at_pc=datetime.fromisoformat(row["received_at"]),
+            station_id=row["station_id"],
+            station_timestamp=row["station_timestamp"],
+            sequence=row["sequence"],
+            uid=row["uid"],
+            callsign=row["callsign"],
+            rssi=row["rssi"],
+            source=row["source"],
+            replayed=bool(row["replayed"]),
+            scope=row["scope"],
+            id=row["id"],
+            duplicate=bool(row["duplicate"]),
+            duplicate_of=row["duplicate_of"],
+        )
 
     def insert_raw(
         self,

@@ -9,7 +9,7 @@ import pytest
 
 from foxcore.config import SerialConfig, TimeSyncConfig
 from foxcore.events import ConnectionEvent
-from foxcore.persistence import Store
+from foxcore.persistence import MIGRATIONS, Store
 from foxcore.serial import FakeTransport, SerialTransport
 from foxcore.service import IngestService
 from foxcore.simulator import messages
@@ -51,7 +51,7 @@ def test_future_migration_rejected(tmp_path: Path) -> None:
     path = tmp_path / "future.db"
     store = Store(path)
     with store.db:
-        store.db.execute("INSERT INTO schema_migrations VALUES (2)")
+        store.db.execute("INSERT INTO schema_migrations VALUES (?)", (len(MIGRATIONS) + 1,))
     store.close()
     with pytest.raises(ValueError, match="schema version"):
         Store(path)
