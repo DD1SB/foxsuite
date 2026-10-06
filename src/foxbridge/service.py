@@ -87,6 +87,14 @@ class BridgeService:
         self._state(True, "Output opened; peer acceptance is unacknowledged")
         return True
 
+    async def _disconnect(self, detail: str) -> None:
+        try:
+            await self.output.close()
+        except OSError as exc:
+            # Device removal can also fail during close; do not poison later source events.
+            log.warning("ERROR FoxBridge output close failed: %s", exc)
+        self._state(False, detail)
+
     async def _deliver(self, delivery_id: int) -> None:
         delivery = self.repository.claim(delivery_id)
         if delivery is None:
@@ -112,8 +120,10 @@ class BridgeService:
             self.repository.finish(
                 delivery.id, "uncertain" if attempted_write else "failed", str(exc)
             )
-            await self.output.close()
-            self._state(False, f"Output write failed: {exc}")
+            self._next_connect_at = (
+                asyncio.get_running_loop().time() + self.config.output.reconnect_interval_seconds
+            )
+            await self._disconnect(f"Output write failed: {exc}")
             log.warning("ERROR FoxBridge delivery=%s failed: %s", delivery.id, exc)
         else:
             self.repository.finish(delivery.id, "sent")
@@ -139,8 +149,7 @@ class BridgeService:
                 finally:
                     self.queue.task_done()
         finally:
-            await self.output.close()
-            self._state(False, "Bridge stopped")
+            await self._disconnect("Bridge stopped")
 
     async def drain(self) -> None:
         await self.queue.join()

@@ -149,6 +149,7 @@ def test_output_failures_and_reconnect_never_automatically_resend(tmp_path: Path
         assert DeliveryRepository(store).list_deliveries("fjww")[0]["status"] == "uncertain"
         output.fail_write = False
         assert third is not None
+        await asyncio.sleep(0.002)
         bridge.enqueue(third, explicit=True)
         await flush(bridge)
         assert len(output.frames) == 2
@@ -402,3 +403,30 @@ def test_validation_and_station_failures_are_visible(tmp_path: Path, reason: str
     if reason == "missing_station":
         assert DeliveryRepository(store).status(config())["unmapped_stations"] == [1]
     store.close()
+
+
+def test_removed_output_close_failure_does_not_poison_ingest(tmp_path: Path) -> None:
+    class RemovedOutput(FakeOutput):
+        async def close(self) -> None:
+            self.connected = False
+            raise OSError("Device removed during close")
+
+    async def check() -> None:
+        store = Store(tmp_path / "close-error.db")
+        output = RemovedOutput()
+        bridge, ingest = setup(store, output)
+        output.fail_write = True
+        ingest.ingest(messages()[0], "base", NOW)
+        await flush(bridge)
+        output.fail_write = False
+        await asyncio.sleep(0.002)
+        ingest.ingest(messages()[0].replace(b'"sequence":2', b'"sequence":3'), "base", NOW)
+        await flush(bridge)
+        assert len(output.frames) == 1 and store.stats()["raw_events"] == 2
+        assert DeliveryRepository(store).status(config())["status_counts"] == {
+            "sent": 1,
+            "uncertain": 1,
+        }
+        store.close()
+
+    asyncio.run(check())
