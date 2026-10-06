@@ -52,6 +52,52 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "CREATE TABLE bridge_output_state (target TEXT PRIMARY KEY, updated_at TEXT NOT NULL, "
         "endpoint TEXT NOT NULL, connected INTEGER NOT NULL, detail TEXT NOT NULL)",
     ),
+    (
+        "CREATE TABLE live_events (id INTEGER PRIMARY KEY, name TEXT NOT NULL, date TEXT NOT NULL, "
+        "timezone TEXT NOT NULL, description TEXT NOT NULL, state TEXT NOT NULL "
+        "CHECK(state IN ('DRAFT','RUNNING','CLOSED','ARCHIVED')), timing_mode TEXT NOT NULL "
+        "CHECK(timing_mode IN ('PUNCH_START_FINISH','PREDEFINED_START')), competition_start_at TEXT, "
+        "competition_end_at TEXT, default_start_at TEXT, minimum_unix_timestamp INTEGER NOT NULL, "
+        "maximum_receive_skew_seconds INTEGER NOT NULL, cursor INTEGER NOT NULL DEFAULT 0, "
+        "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        "CREATE UNIQUE INDEX live_one_running ON live_events(state) WHERE state='RUNNING'",
+        "CREATE TABLE live_categories (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL "
+        "REFERENCES live_events(id), code TEXT NOT NULL, display_name TEXT NOT NULL, "
+        "active INTEGER NOT NULL, display_order INTEGER NOT NULL, UNIQUE(event_id,code), "
+        "UNIQUE(event_id,id))",
+        "CREATE TABLE live_participants (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL "
+        "REFERENCES live_events(id), start_number INTEGER NOT NULL, first_name TEXT NOT NULL, "
+        "last_name TEXT NOT NULL, category_id INTEGER NOT NULL, uid TEXT, club TEXT NOT NULL, "
+        "start_time TEXT, manual_status TEXT, active INTEGER NOT NULL, created_at TEXT NOT NULL, "
+        "updated_at TEXT NOT NULL, UNIQUE(event_id,start_number), UNIQUE(event_id,id), "
+        "FOREIGN KEY(event_id,category_id) REFERENCES live_categories(event_id,id))",
+        "CREATE UNIQUE INDEX live_active_uid ON live_participants(event_id,uid) "
+        "WHERE active=1 AND uid IS NOT NULL",
+        "CREATE INDEX live_participant_category ON live_participants(event_id,category_id)",
+        "CREATE TABLE live_event_stations (event_id INTEGER NOT NULL REFERENCES live_events(id), "
+        "station_id INTEGER NOT NULL, display_name TEXT NOT NULL, role TEXT NOT NULL "
+        "CHECK(role IN ('CONTROL','START','FINISH')), enabled INTEGER NOT NULL, "
+        "display_order INTEGER NOT NULL, PRIMARY KEY(event_id,station_id))",
+        "CREATE TABLE live_event_punches (event_id INTEGER NOT NULL REFERENCES live_events(id), "
+        "punch_id INTEGER NOT NULL REFERENCES punches(id), uid TEXT NOT NULL, associated_at TEXT NOT NULL, "
+        "origin TEXT NOT NULL, PRIMARY KEY(event_id,punch_id))",
+        "CREATE INDEX live_event_uid ON live_event_punches(event_id,uid,punch_id)",
+        "CREATE TABLE live_punch_interpretations (event_id INTEGER NOT NULL, punch_id INTEGER NOT NULL, "
+        "participant_id INTEGER, status TEXT NOT NULL, role TEXT, reason TEXT NOT NULL, "
+        "PRIMARY KEY(event_id,punch_id), FOREIGN KEY(event_id,punch_id) "
+        "REFERENCES live_event_punches(event_id,punch_id), FOREIGN KEY(event_id,participant_id) "
+        "REFERENCES live_participants(event_id,id))",
+        "CREATE TABLE live_results (event_id INTEGER NOT NULL, participant_id INTEGER NOT NULL, "
+        "payload TEXT NOT NULL, PRIMARY KEY(event_id,participant_id), "
+        "FOREIGN KEY(event_id,participant_id) REFERENCES live_participants(event_id,id))",
+        "CREATE TABLE live_manual_exclusions (event_id INTEGER NOT NULL, punch_id INTEGER NOT NULL, "
+        "reason TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(event_id,punch_id), "
+        "FOREIGN KEY(event_id,punch_id) REFERENCES live_event_punches(event_id,punch_id))",
+        "CREATE TABLE live_audit_events (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL "
+        "REFERENCES live_events(id), created_at TEXT NOT NULL, operator TEXT NOT NULL, action TEXT NOT NULL, "
+        "entity TEXT NOT NULL, before_json TEXT, after_json TEXT, reason TEXT NOT NULL)",
+        "CREATE INDEX live_audit_event ON live_audit_events(event_id,id)",
+    ),
 )
 
 

@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foxsuite"
-version = "0.2.0"
+version = "0.3.0"
 description = "Offline FoxIdent infrastructure and SPORTident live compatibility gateway"
 requires-python = ">=3.12"
-dependencies = ["pyserial>=3.5,<4", "tzdata>=2024.1"]
+dependencies = ["pyserial>=3.5,<4", "tzdata>=2024.1", "fastapi>=0.115,<1", "uvicorn>=0.30,<1", "websockets>=13,<17", "jinja2>=3.1,<4"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff", "mypy", "types-pyserial", "build"]
+dev = ["pytest>=8", "ruff", "mypy", "types-pyserial", "build", "httpx>=0.27,<1"]
 
 [project.scripts]
 foxsuite = "foxcore.cli:main"
@@ -21,6 +21,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 foxcore = ["py.typed"]
 foxbridge = ["py.typed"]
+foxlive = ["py.typed", "templates/*.html", "static/*.js", "static/*.css"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

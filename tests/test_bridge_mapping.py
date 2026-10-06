@@ -92,7 +92,7 @@ def test_v1_database_upgrades_without_source_changes(tmp_path: Path) -> None:
         assert store.version == 1
         store.close()
     store = Store(path)
-    assert store.version == 2 and store.raw_events() == original
+    assert store.version == len(MIGRATIONS) and store.raw_events() == original
     assert store.get_punch(punch.id or 0) == punch
     assert store.db.execute("PRAGMA foreign_key_check").fetchall() == []
     store.close()
