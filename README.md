@@ -1,14 +1,21 @@
 # FoxSuite
 
-FoxSuite is the offline PC-side suite for FoxIdent field stations and the FoxIdentServer USB base. Milestone 1 implements only **foxcore**, infrastructure shared by future applications.
+FoxSuite is the offline PC-side suite for FoxIdent field stations and the FoxIdentServer USB base.
+M1 provides shared `foxcore` infrastructure. M2 implements `foxbridge`, a minimal SPORTident live
+compatibility gateway for FjwW; it does not replace Fjw competition software.
 
-FoxBridge: not implemented yet
+FoxBridge: implemented; FjwW compatibility is not yet hardware/manual validated.
 
 FoxLive: not implemented yet
 
-Runner RFID → FoxIdent → LoRa mesh → FoxIdentServer → USB serial → foxcore → future consumers.
+Runner RFID → FoxIdent → LoRa → FoxIdentServer → USB → foxcore → FoxBridge → COM pair → FjwW SI-C.
 
-M1 includes typed TOML config, reconnecting bidirectional serial, source-derived parsing, canonical punches/UIDs, raw-first SQLite persistence/migrations, retained duplicate detection, participant/station mapping foundations, isolated subscriptions, TimeSync, replay, simulator and CLI. No scoring, SPORTident, Fjw integration, UI, cloud or telemetry exists.
+M1 includes typed TOML config, reconnecting serial, source-derived parsing, canonical punches/UIDs,
+raw-first SQLite persistence/migrations, retained duplicates, mapping foundations, subscriptions,
+TimeSync, replay, simulator and CLI. Its physical hardware acceptance was supplied by the user.
+M2 adds explicit UID/SI-card and station/control mappings, extended D3 AUTOSEND encoding, explicit
+timezone handling, serial/binary-capture output and persistent delivery audit/idempotency.
+No scoring, rankings, categories, competition UI, cloud or telemetry exists.
 
 ## Installation and configuration
 
@@ -35,6 +42,42 @@ python -m foxcore.simulator
 
 Windows installation/native pipeline instructions are in [operations](docs/OPERATIONS.md). Defaults are source-verified baud 115200 and `TIME <unix>\n`, refreshed every 60s. Relative TOML DB paths resolve beside the config. No application COM port is hardcoded. Runtime requires no Internet after installation.
 
+## FoxBridge
+
+Enable `[bridge]` in the copied TOML; configure distinct physical input and virtual output ports,
+stable target name and explicit event timezone. Provision a virtual COM pair separately; FoxSuite
+does not install drivers. FjwW opens the pair's **other** endpoint at a matching baud (default 38400).
+Register the intended runner/card identity in Fjw before testing.
+
+```sh
+foxsuite --config config/foxsuite.toml bridge uid-map add 04A78319BCDE12 912345
+foxsuite --config config/foxsuite.toml bridge station-map add 1 31 --role CONTROL
+foxsuite --config config/foxsuite.toml bridge station-map add 2 3 --role START
+foxsuite --config config/foxsuite.toml bridge station-map add 3 4 --role FINISH
+foxsuite --config config/foxsuite.toml bridge run --show-punches
+foxsuite --config config/foxsuite.toml bridge status
+foxsuite --config config/foxsuite.toml bridge deliveries
+foxsuite --config config/foxsuite.toml bridge test-frame 912345 31
+foxsuite --config config/foxsuite.toml bridge replay
+```
+
+No automatic virtual card allocation: explicit active SI identities must be unique. Unmapped or
+invalid-time punches stay auditable and are not emitted. Automatic delivery is reserved once per
+target/source punch; restart/reconnect never scans or silently resends old punches. Replayed punches
+are blocked unless `--allow-replay-output` is explicit. `bridge resend PUNCH_ID` is operator-controlled
+and can duplicate receiver data. `sent` means local write success, not Fjw acceptance.
+
+For a safe offline test set output `type="file"` and its capture path, then:
+
+```sh
+foxsuite simulate | foxsuite --config config/foxsuite.toml bridge run --stdin
+```
+
+One cycle retains all 7 raw lines and 2 punches, marks the retry duplicate and emits one 19-byte frame
+when mappings exist. CLI simulation uses current PC time; `simulate --timestamp UNIX_SECONDS` produces
+fixed fixtures. Review [SPORTident evidence](docs/SPORTIDENT.md), [Fjw integration](docs/FJW_INTEGRATION.md)
+and [M2 validation](docs/M2_VALIDATION.md) before connecting a real competition event.
+
 ## Development and architecture
 
 ```sh
@@ -47,6 +90,9 @@ python -m build
 
 Tests require no hardware. [Protocol](docs/PROTOCOL.md) separates source facts, discrepancies and assumptions. [Architecture](docs/ARCHITECTURE.md) covers concurrency; [database](docs/DATABASE.md) covers migrations/recovery/dedupe; [operations](docs/OPERATIONS.md) includes the hardware checklist.
 
-Repository: `reference/` read-only authoritative firmware and supplementary context; `src/foxcore/` config, events, protocol, dedupe, persistence, service, serial, timesync, participants, stations, replay, simulator, CLI and safe logging modules; `tests/`; `config/`; `docs/`. Flat modules keep M1 small without empty future packages.
+Repository: read-only `reference/`; shared `src/foxcore/`; gateway `src/foxbridge/` (config, mapping,
+encoder/time, delivery persistence/service, output and CLI); hardware-free `tests/` with a published
+protocol vector; `config/`; `docs/`. Flat modules avoid empty or speculative future packages.
 
-Roadmap: future FoxBridge will consume canonical events/mappings for existing-software compatibility; future FoxLive will add standalone competition functionality. Neither has been started. Both must reuse foxcore serial, parsing, persistence, TimeSync, dedupe and event transport.
+Roadmap: manually validate M2 against FjwW and the full physical Fox chain. FoxLive/M3 remains
+unstarted and requires explicit approval. Future consumers must reuse FoxCore infrastructure.

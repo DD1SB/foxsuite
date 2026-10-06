@@ -1,4 +1,4 @@
-# FoxBridge SPORTident subset — M2 research/design
+# FoxBridge SPORTident subset — M2
 
 Researched 2026-10-06 before encoder implementation. Evidence classes below are deliberately distinct.
 
@@ -75,6 +75,19 @@ time. This cannot prove the station was synchronized; source has no validity fla
 Offsets are synthetic persistent counters, not accessible SI backup memory. M2 does not answer
 backup commands, ACK-based card readout, station discovery/programming or Bluetooth requests.
 No wakeup prefix is emitted; receivers consume exact length-delimited extended data.
+
+## Implemented and automated validation
+
+`foxbridge.sportident` implements the framing, independent polynomial CRC, SI5/direct card encoding,
+control encoding and typed D3 punch model above. `foxbridge.time` converts validated Unix time;
+roles are mapping policy, not extra D3 fields. Frame validation is a diagnostic helper for exactly
+this subset, not a full SPORTident parser.
+
+`tests/fixtures/sportident_vectors.json` records the published vector's provenance. Encoder tests
+compare against its literal bytes/CRC rather than an encode/decode round trip. Further tests cover
+SI5 series, unsupported gaps, 24-bit limits, control boundaries, AM/PM, midnight, weekday, timezone
+and DST. POSIX pseudo-terminal capture verifies that the serial output transports the known frame
+unchanged. This is software serial testing, not a physical SPORTident capture or Windows driver test.
 
 ## Hardware/Fjw validation still required
 
