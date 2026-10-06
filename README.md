@@ -4,7 +4,9 @@ FoxSuite is the offline PC-side suite for FoxIdent field stations and the FoxIde
 M1 provides shared `foxcore` infrastructure. M2 implements `foxbridge`, a minimal SPORTident live
 compatibility gateway for FjwW; it does not replace Fjw competition software.
 
-FoxBridge: implemented; FjwW compatibility is not yet hardware/manual validated.
+FoxBridge: Milestone 2 complete; FjwW SI-C compatibility manually validated on the tested Windows/VSPE setup.
+
+Full FjwW competition workflow not tested.
 
 FoxLive: not implemented yet
 
@@ -47,7 +49,16 @@ Windows installation/native pipeline instructions are in [operations](docs/OPERA
 Enable `[bridge]` in the copied TOML; configure distinct physical input and virtual output ports,
 stable target name and explicit event timezone. Provision a virtual COM pair separately; FoxSuite
 does not install drivers. FjwW opens the pair's **other** endpoint at a matching baud (default 38400).
-Register the intended runner/card identity in Fjw before testing.
+The transport acceptance test required no additional competition configuration. For competition use,
+configure runner/card and fox/control associations in Fjw separately; those workflows remain untested.
+
+The user validated a real tag/station/LoRa/base path on COM3, FoxBridge output COM10 at 38400 with
+Europe/Berlin, VSPE COM10 ↔ COM11 and FjwW SI-C on COM11. UID `046365525C6180 → 912345` and station
+`1 → CONTROL 31` produced SI Status `SI-No=31`, `CN=912345`. An independent hardware-punch serial
+capture passed protocol checks; no extra handshake was required for that observed live path.
+
+The commands below use the simulator UID, not the real validation UID. Use separate test databases
+for these mappings: both UIDs cannot actively map to the same SI number in one database.
 
 ```sh
 foxsuite --config config/foxsuite.toml bridge uid-map add 04A78319BCDE12 912345
@@ -94,5 +105,7 @@ Repository: read-only `reference/`; shared `src/foxcore/`; gateway `src/foxbridg
 encoder/time, delivery persistence/service, output and CLI); hardware-free `tests/` with a published
 protocol vector; `config/`; `docs/`. Flat modules avoid empty or speculative future packages.
 
-Roadmap: manually validate M2 against FjwW and the full physical Fox chain. FoxLive/M3 remains
-unstarted and requires explicit approval. Future consumers must reuse FoxCore infrastructure.
+M2 transport acceptance is closed; full competition semantics, Start/Finish and long-running Fjw field
+operation remain unvalidated. Serial write is not receiver acknowledgement, and explicit resend/replay
+can duplicate competition data. FoxLive/M3 remains unstarted and requires explicit approval.
+Future consumers must reuse FoxCore infrastructure.

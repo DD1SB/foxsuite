@@ -70,6 +70,13 @@ pair and baud 38400; Fjw opens the other endpoint at the same rate. Never share 
 the physical base port as output. Driver installation is not performed; Windows driver/Secure Boot
 compatibility remains operator responsibility. See [Fjw integration](FJW_INTEGRATION.md).
 
+The manually validated Windows layout is physical base COM3, FoxBridge output COM10 at 38400,
+VSPE pair COM10 ↔ COM11 and FjwW SI-C receiver COM11, with timezone Europe/Berlin. The real tag UID
+`046365525C6180` mapped to card 912345, Fox station 1 to CONTROL 31. SI Status showed `SI-No=31`
+and `CN=912345`; no extra handshake or Fjw competition configuration was needed for protocol
+acceptance. These are tested assignments, not hardcoded defaults or proof for other virtual drivers.
+Close a diagnostic COM11 capture before Fjw opens that endpoint; never let both hold it at once.
+
 For diagnostics instead use `type="file"` and `path="data/bridge-capture.bin"`; frames append to this
 binary capture and are fsynced, without opening any Fjw port. TOML capture paths, like DB paths,
 are relative to the config folder. `test-frame` only prints hex and never opens output.
@@ -164,8 +171,19 @@ Serial streams without newline buffer until newline or disconnect/shutdown; sust
 
 The user reports M1 acceptance with physical FoxIdentServer/station/tag, PC TimeSync, station
 TimeRequest/SyncPacket, USB reconnect and persistence across restart. Those observations precede
-this task. This environment has not performed M2 Windows/Fjw or physical Fox→Fjw validation.
-The checklist below remains available for explicit field revalidation and untested stress/failure cases.
+M2 closure. The user has now also supplied successful M2 Windows VSPE serial capture, real Fox live
+hardware path and FjwW SI-C decoding observations, recorded in [M2_VALIDATION.md](M2_VALIDATION.md).
+The Linux agent records that evidence rather than claiming it performed the Windows test. Full Fjw
+competition setup, participant/card assignment, competition fox mapping, result calculation,
+Start/Finish competition semantics and certificate/result workflows were not tested. These are
+outside the accepted M2 transport test and do not prevent closure.
+
+Remaining field risks: no receiver acknowledgement after write; explicit resend/replay can intentionally
+duplicate Fjw data; Start/Finish and long-running Fjw operation are unvalidated. Reconnect, retry,
+revisit and restart have automated/M1 evidence as documented but were not newly field-tested against
+Fjw in the supplied single-punch observation. Other versions/drivers and event date/week semantics need
+separate validation. The checklist below is for future revalidation/stress testing, not outstanding M2
+transport acceptance. No M3 implementation is included.
 
 - [ ] Connect actual FoxIdentServer; record board/firmware/USB driver versions.
 - [ ] Verify 115200 baud, 8N1, reset/DTR on Windows.
@@ -181,5 +199,6 @@ The checklist below remains available for explicit field revalidation and untest
 
 Evidence labels: Fox protocol is source-code verified; core/bridge fake transports are unit tested;
 stdin pipeline is simulator tested; published D3 framing is regression-tested and serial-capture tested
-on a POSIX pseudo-terminal. M1 hardware acceptance is user-reported. M2 Windows/Fjw compatibility
-and full physical-chain acceptance are pending: use the [Fjw checklist](FJW_INTEGRATION.md).
+on a POSIX pseudo-terminal. Independent Windows serial validation, real Fox hardware delivery and
+real FjwW SI-C acceptance are user-supplied manual evidence for the tested VSPE configuration.
+Full competition workflows remain untested: see [Fjw integration](FJW_INTEGRATION.md).

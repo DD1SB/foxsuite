@@ -55,9 +55,27 @@ offset 2928. This is a published regression vector, not a FoxSuite hardware capt
 
 ## Observed behavior
 
-No SPORTident or FjwW traffic was physically observed in this task. The user reports accepted
-M1 Fox hardware tests including TimeSync/reconnect/persistence. FoxCore supplies stored absolute
-station seconds; reference firmware and docs/PROTOCOL remain authoritative for its semantics.
+In addition to earlier M1 hardware acceptance, the user supplied real Windows serial capture and
+FjwW SI-C observations for implementation commit `31c3761df118370148175bc7cbabde8e48907b8b`.
+Real RFID UID `046365525C6180` mapped to card 912345, Fox station 1 to CONTROL 31. A hardware punch
+passed through the field station/LoRa/base COM3, FoxCore/FoxBridge, COM10 ↔ COM11 VSPE pair and FjwW.
+Bridge output used 38400 baud and Europe/Berlin. The independent Windows capture was:
+
+```text
+02 D3 0D 00 1F 00 0D EB D9 05 15 9E 00 00 00 00 76 93 03
+```
+
+It was independently checked as 19 bytes, D3 / C_TRANS_REC AUTOSEND, control 31, card 912345,
+correct punch time, CRC `7693` and valid framing. The closure's existing validator also accepts the
+supplied bytes. `TD=05`, half-day seconds `159E` (5534), zero subseconds and offset zero encode
+Tuesday PM/week counter 0, wall time 13:32:14; absolute date/Unix seconds were not supplied.
+FjwW SI Status displayed `SI-No=31` and `CN=912345`, with SI-C enabled on COM11. No additional
+handshake or competition configuration was required for this observed path.
+
+This is operator-supplied manual evidence, not a Windows test run by the Linux agent. The screenshot
+was manually observed, not attached here. It establishes passive D3/control/card reception for the
+tested configuration, not participant assignment or competition scoring. FoxCore's stored absolute
+station seconds and reference firmware/docs/PROTOCOL remain authoritative for Fox timestamp semantics.
 
 ## Assumptions and implementation policy
 
@@ -89,8 +107,14 @@ SI5 series, unsupported gaps, 24-bit limits, control boundaries, AM/PM, midnight
 and DST. POSIX pseudo-terminal capture verifies that the serial output transports the known frame
 unchanged. This is software serial testing, not a physical SPORTident capture or Windows driver test.
 
-## Hardware/Fjw validation still required
+## Resolved compatibility assumptions and remaining validation
 
-D3 acceptance, weekday/date interpretation, zero subseconds, synthetic offsets, lack of station
-query responses and Windows virtual COM behavior require Stage C validation in FJW_INTEGRATION.
-Protocol tests and serial capture prove framing, not FjwW compatibility.
+D3 acceptance, passive SI-C reception without an extra handshake, and Windows virtual serial
+transport are now manually validated for the reported VSPE/Fjw setup. The observed frame included
+zero subseconds and offset zero. This does not generalize to other releases/drivers or prove full
+date/week interpretation, nonzero offsets, other card/control values or Start/Finish competition roles.
+
+Protocol tests/capture remain distinct from the real Fjw observation. Full competition participant/fox
+assignment, result calculation and certificate/result workflows were not tested. Start/Finish and
+long-running Fjw field operation remain unvalidated. Serial write success is not a receiver ACK;
+explicit resend/replay can duplicate Fjw data. See [FJW_INTEGRATION.md](FJW_INTEGRATION.md).

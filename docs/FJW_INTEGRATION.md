@@ -20,21 +20,25 @@ Menu names above are documentation-verified, not observed on the current machine
 [MeOS D3 receiver](https://github.com/melinsoftware/meos/blob/11dbad72b972353b4bcf7fa00535263c18616c7d/code/SportIdent.cpp)
 and [sireader](https://github.com/gaudenz/sireader/blob/38b03e7e1b9b4da0aa6c3a7d756faa06a3a621c7/sireader.py)
 establish extended AUTOSEND encoding. This supports the implementation target but does not prove
-which bytes a particular FjwW release accepts. The exact D3/Fjw combination still requires validation.
+which bytes every FjwW release accepts. The user-supplied manual evidence below now establishes
+acceptance for the tested FoxBridge/FjwW SI-C setup.
 
-## Intended Windows topology
+## Manually validated Windows topology
 
 ```text
-FoxIdentServer physical COM3 → FoxCore → FoxBridge → COM9 ↔ COM10 → FjwW SI-C
+FoxIdentServer physical COM3 → FoxCore → FoxBridge → COM10 ↔ VSPE pair ↔ COM11 → FjwW SI-C
 ```
 
-COM numbers are examples only. FoxCore alone opens the physical base port. FoxBridge opens one
-endpoint of a user-provisioned COM pair; FjwW opens the other. Never select the same endpoint.
+These COM numbers are the actual tested assignments, not hardcoded requirements. FoxCore alone opens
+the physical base port. FoxBridge opens one endpoint of a user-provisioned COM pair; FjwW opens the
+other. Never select the same endpoint.
 The [original com0com project](https://com0com.sourceforge.net/) documents paired endpoints;
 FoxBridge does not install drivers or depend on a particular vendor. Use an existing pair whose
 driver is accepted by the target Windows/Secure Boot configuration, or two USB serial adapters
 with a proper null-modem connection. Driver installation/signing is outside FoxSuite.
-No specific Windows driver has been tested in this environment.
+The operator's VSPE pair was successfully tested on Windows. Other virtual-pair providers, driver
+versions and Windows/Secure Boot configurations are not validated by that observation; com0com and
+physical null-modem adapters remain untested alternatives, not validated recommendations.
 
 ## Configuration and mapping
 
@@ -45,7 +49,7 @@ Set both virtual serial endpoints to 38400, 8 data bits, no parity, 1 stop bit, 
 the **operator** must also keep Fjw on the opposite pair endpoint.
 
 ```text
-foxsuite --config config/foxsuite.toml bridge uid-map add 04A78319BCDE12 912345
+foxsuite --config config/foxsuite.toml bridge uid-map add 046365525C6180 912345
 foxsuite --config config/foxsuite.toml bridge station-map add 1 31 --role CONTROL
 foxsuite --config config/foxsuite.toml bridge station-map add 2 3 --role START
 foxsuite --config config/foxsuite.toml bridge station-map add 3 4 --role FINISH
@@ -54,43 +58,66 @@ foxsuite --config config/foxsuite.toml bridge status
 foxsuite --config config/foxsuite.toml bridge deliveries
 ```
 
-The card number is an example, not an automatically assigned identity. Confirm the chosen identity
-exists in the isolated Fjw test event. No Fjw files are edited by FoxBridge.
+The UID/card and CONTROL 31 mappings above match the manual acceptance test; START/FINISH lines
+are additional operational examples, not manually validated Fjw roles. No identity is auto-assigned.
+A participant/event setup was not needed for the SI-C protocol acceptance test. For competition use,
+configure the chosen card and controls in Fjw separately; that workflow was not tested. No Fjw files
+are edited by FoxBridge.
 
 ## Observed behavior
 
-FjwW is not installed/accessible on this Linux machine and Wine is unavailable. No Stage C or
-physical Fox→Fjw test has been performed here. M1 hardware acceptance was supplied by the user;
-it is not evidence for M2 compatibility.
+The user supplied successful Windows manual validation of implementation commit
+`31c3761df118370148175bc7cbabde8e48907b8b`. A real RFID punch traversed the field station, LoRa,
+base USB/COM3, FoxCore/FoxBridge, COM10/COM11 VSPE pair and FjwW SI-C. Bridge output was 38400
+baud, timezone Europe/Berlin; UID `046365525C6180` mapped to card `912345`, station 1 to CONTROL 31.
 
-## Assumptions
+Before Fjw testing, an independent serial capture of the real hardware punch produced:
 
-SI-C accepts D3 extended AUTOSEND directly, without a full programmable/readout station handshake.
-Runner identities must already exist in the loaded Fjw event and match explicit SI mappings.
-CONTROL/START/FINISH are mapping roles; D3 has no separate role field. Fjw recognizes configured
-codes. We do not calculate results or alter competition files.
+```text
+02 D3 0D 00 1F 00 0D EB D9 05 15 9E 00 00 00 00 76 93 03
+```
 
-## Hardware/Fjw validation still required
+The operator independently checked length, extended D3 / C_TRANS_REC AUTOSEND, control/card/time,
+CRC and framing. With SI-C enabled on COM11, FjwW decoded the punch and displayed `SI-No=31`
+and `CN=912345` in SI Status. A screenshot was observed manually; it is not a repository artifact.
+No additional handshake or Fjw competition configuration was required for this observed acceptance
+path. The Linux agent did not run this Windows test; exact software versions/test date were not supplied.
+
+## Resolved assumptions and remaining limits
+
+The tested SI-C path passively accepts FoxBridge D3 without an additional handshake, and the tested
+Windows VSPE transport works. These are now observations, not unresolved assumptions. They do not
+establish compatibility with every Fjw/driver version or station mode.
+
+CONTROL/START/FINISH are mapping roles; D3 has no separate role field. Card/control decoding was
+observed for 912345/31, not association with an actual competitor or configured competition fox.
+Full competition creation, participant assignment, fox configuration, result calculation, complete
+Start/Finish semantics and certificates/results were not tested and are not M2 closure requirements.
+We do not calculate results or alter competition files. Date/week rollover, nonzero synthetic offsets,
+other identities and Start/Finish require separate Fjw observations.
+
+## Validation stages and repeatable acceptance procedure
 
 Stage A is automated: published vector/CRC and full regression suite. Stage B is automated on Linux:
 `test_serial_output_known_frame_capture` sends the published frame through pyserial to a POSIX
-pseudo-terminal diagnostic receiver and compares all 19 bytes and CRC. Windows COM-pair capture is
-still required. Stage C remains unperformed. On Windows:
+pseudo-terminal diagnostic receiver and compares all 19 bytes and CRC. Stage B additionally passed
+with independent Windows VSPE capture of a real hardware punch. Stage C SI-C reception passed as
+recorded above. To repeat the accepted scope on Windows:
 
-1. Create an isolated Fjw test event with known runner/card and control assignments.
-2. Provision the COM pair; confirm independent access to each endpoint.
-3. Select SI-C receiver endpoint and matching baud in the documented SportIdent dialog.
-4. Configure FoxBridge source port, distinct output port, target name, timezone and mappings.
-5. Inject one mapped punch; verify acceptance, card/runner, control and exact event-local time.
-6. Test START=3, FINISH=4, multiple controls, morning/afternoon and midnight crossing.
-7. Inject a FoxCore duplicate; confirm only one live Fjw punch.
-8. Disconnect/reconnect output and USB source; verify diagnostics and no historical resends.
-9. Restart bridge; verify no historical backlog automatically appears.
-10. Run real RFID → FoxIdent → LoRa → base → FoxCore → bridge → Fjw; verify later revisit,
-    duplicate suppression, timestamps and independent TimeSync.
+1. Provision the VSPE pair; FoxBridge uses COM10 and the receiver uses COM11 in the tested layout.
+2. Configure physical source COM3, output COM10 at 38400, Europe/Berlin and the explicit mappings.
+3. With Fjw not holding COM11, independently capture a real hardware punch and validate all frame fields.
+4. Close the diagnostic receiver, enable FjwW SI-C on COM11 and use the matching baud.
+5. Punch the real tag; observe SI Status `SI-No=31` and `CN=912345`. The reported acceptance test
+   needed no additional competition configuration or handshake.
 
 Record Fjw version, Windows/driver versions, mappings, timezone, captured frames and observations.
-Only successful observations may mark FjwW compatibility as manually validated.
+The supplied observations close M2's SI-C transport scope. For optional competition/field follow-up,
+separately configure a test event and verify actual participant/fox/time association, Start/Finish,
+multiple controls and date boundaries. Revisit/duplicate behavior, source/output reconnect, restart,
+independent TimeSync and long-running Fjw operation still need end-to-end Fjw field observations;
+their automated or M1 evidence is not a substitute. These are remaining operational limits, not a
+claim that full competition operation was validated or a request to start M3.
 
 ## Failure/recovery policy
 
