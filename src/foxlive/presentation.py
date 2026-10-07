@@ -36,6 +36,26 @@ def translate(key: str, lang: str = "en", **values: Any) -> str:
 
 
 ERROR_KEYS = {
+    "Runner does not exist": "error.runner_missing",
+    "Runner is inactive": "error.runner_inactive",
+    "Runner names cannot be blank": "error.names_blank",
+    "Runner is already registered in this event": "error.runner_registered",
+    "Birth year or birth date is required": "runner.birth_required",
+    "Invalid birth date": "error.birth_invalid",
+    "Birth date cannot be in the future": "error.birth_future",
+    "Birth year cannot be in the future": "error.birth_future",
+    "Birth year does not match birth date": "error.birth_mismatch",
+    "Club does not exist": "error.club_missing",
+    "Club name cannot be blank": "error.club_blank",
+    "Club code already exists": "error.club_exists",
+    "Category does not exist": "error.category_missing",
+    "Category is not enabled for this event": "error.category_disabled",
+    "Category is inactive": "error.category_inactive",
+    "Category selection cannot be changed; enable another category instead": "error.category_selection",
+    "Runner selection is ambiguous; register manually": "error.runner_ambiguous",
+    "Runner appears twice in CSV; register ambiguous people manually": "error.csv_runner_repeat",
+    "Club selection is ambiguous": "error.club_ambiguous",
+    "Club code and name do not match": "error.club_mismatch",
     "Archived events are read-only": "error.archived",
     "Cannot start event: another event is already RUNNING": "error.other_running",
     "Category does not exist in this event": "error.category_missing",
@@ -173,7 +193,7 @@ def rfid_candidates(
     rows = repo.db.execute(
         "WITH candidates AS (SELECT p.*,ROW_NUMBER() OVER(PARTITION BY uid ORDER BY id DESC) AS latest "
         "FROM punches p WHERE p.id>? AND p.id<=? AND p.scope='live' AND p.replayed=0 AND p.duplicate=0 "
-        "AND NOT EXISTS(SELECT 1 FROM live_participants e "
+        "AND NOT EXISTS(SELECT 1 FROM live_entries e "
         "WHERE e.event_id=? AND e.active=1 AND e.uid=p.uid)) "
         "SELECT p.*,s.display_name AS station_name FROM candidates p "
         "LEFT JOIN live_event_stations s ON s.event_id=? AND s.station_id=p.station_id "

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -33,12 +33,19 @@ from .config import LiveConfig
 from .models import (
     Category,
     CategoryData,
+    Club,
+    ClubData,
     Entry,
     EntryData,
     Event,
+    EventCategoryData,
     EventData,
+    MasterCategory,
     Model,
+    RegistrationData,
     Result,
+    Runner,
+    RunnerData,
     State,
     Station,
     StationData,
@@ -69,6 +76,11 @@ class CSVInput(Model):
 class LocalTimeInput(Model):
     value: str = Field(max_length=40)
     timezone: str = Field(max_length=100)
+
+
+class NewRegistrationInput(Model):
+    runner: RunnerData
+    entry: RegistrationData
 
 
 class Hub:
@@ -356,12 +368,54 @@ def create_app(
         current().live.repo.event(event_id)
         return current().live.repo.categories(event_id)
 
+    @app.get("/api/master/categories", response_model=list[MasterCategory])
+    async def master_categories() -> list[MasterCategory]:
+        return current().live.repo.master_categories()
+
+    @app.post("/api/master/categories", response_model=MasterCategory)
+    async def new_master_category(data: CategoryData) -> MasterCategory:
+        return current().live.put_master_category(data)
+
+    @app.put("/api/master/categories/{category_id}", response_model=MasterCategory)
+    async def edit_master_category(category_id: int, data: CategoryData) -> MasterCategory:
+        return current().live.put_master_category(data, category_id)
+
+    @app.get("/api/clubs", response_model=list[Club])
+    async def clubs() -> list[Club]:
+        return current().live.repo.clubs()
+
+    @app.post("/api/clubs", response_model=Club)
+    async def new_club(data: ClubData) -> Club:
+        return current().live.put_club(data)
+
+    @app.put("/api/clubs/{club_id}", response_model=Club)
+    async def edit_club(club_id: int, data: ClubData) -> Club:
+        return current().live.put_club(data, club_id)
+
+    @app.get("/api/runners", response_model=list[Runner])
+    async def runners(
+        search: str = "", limit: int = Query(default=100, ge=1, le=10000)
+    ) -> list[Runner]:
+        return current().live.repo.runners(search, limit)
+
+    @app.post("/api/runners", response_model=Runner)
+    async def new_runner(data: RunnerData) -> Runner:
+        return current().live.put_runner(data)
+
+    @app.put("/api/runners/{runner_id}", response_model=Runner)
+    async def edit_runner(runner_id: int, data: RunnerData) -> Runner:
+        return current().live.put_runner(data, runner_id)
+
+    @app.get("/api/master/audit")
+    async def master_audit() -> list[dict[str, Any]]:
+        return current().live.repo.master_audit()
+
     @app.post("/api/events/{event_id}/categories", response_model=Category)
-    async def create_category(event_id: int, data: CategoryData) -> Category:
+    async def create_category(event_id: int, data: EventCategoryData) -> Category:
         return current().live.put_category(event_id, data)
 
     @app.put("/api/events/{event_id}/categories/{category_id}", response_model=Category)
-    async def edit_category(event_id: int, category_id: int, data: CategoryData) -> Category:
+    async def edit_category(event_id: int, category_id: int, data: EventCategoryData) -> Category:
         return current().live.put_category(event_id, data, category_id)
 
     @app.get("/api/participants", response_model=list[Entry])
@@ -372,6 +426,10 @@ def create_app(
     @app.post("/api/events/{event_id}/participants", response_model=Entry)
     async def create_entry(event_id: int, data: EntryData) -> Entry:
         return current().live.put_entry(event_id, data)
+
+    @app.post("/api/events/{event_id}/register-new-runner", response_model=Entry)
+    async def register_runner(event_id: int, data: NewRegistrationInput) -> Entry:
+        return current().live.register_new_runner(event_id, data.runner, data.entry)
 
     @app.put("/api/events/{event_id}/participants/{participant_id}", response_model=Entry)
     async def edit_entry(event_id: int, participant_id: int, data: EntryData) -> Entry:

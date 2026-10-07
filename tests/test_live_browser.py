@@ -112,16 +112,24 @@ def save_event(page: Any) -> None:
 
 
 def category_and_participant(page: Any) -> None:
-    page.locator('#category-form [name="code"]').fill("M40")
-    page.locator('#category-form [name="display_name"]').fill("Männer 40")
+    page.locator('#master-category-form [name="code"]').fill("M40")
+    page.locator('#master-category-form [name="display_name_en"]').fill("Men 40")
+    page.locator('#master-category-form [name="display_name_de"]').fill("Männer 40")
+    page.locator("#master-category-form button").first.click()
+    page.wait_for_function(
+        "() => document.querySelector('#category-form [name=category_id]').options.length === 2"
+    )
+    page.locator('#category-form [name="category_id"]').select_option(label="M40 – Men 40")
     page.locator("#category-form button").first.click()
     page.wait_for_function(
         "() => document.querySelector('#participant-form [name=category_id]').options.length === 2"
     )
     page.locator('#participant-form [name="start_number"]').fill("17")
-    page.locator('#participant-form [name="first_name"]').fill("Max")
-    page.locator('#participant-form [name="last_name"]').fill("Müller")
-    page.locator('#participant-form [name="category_id"]').select_option(label="M40 – Männer 40")
+    page.locator("#create-runner").click()
+    page.locator('#participant-form [data-person="first_name"]').fill("Max")
+    page.locator('#participant-form [data-person="last_name"]').fill("Müller")
+    page.locator('#participant-form [data-person="birth_year"]').fill("1980")
+    page.locator('#participant-form [name="category_id"]').select_option(label="M40 – Men 40")
 
 
 def test_browser_language_and_rfid_create_confirm_history_collision(
@@ -134,7 +142,7 @@ def test_browser_language_and_rfid_create_confirm_history_collision(
     assert page.locator('#event-form [name="timezone"]').input_value() == "Europe/Berlin"
     save_event(page)
     category_and_participant(page)
-    assert "M40 – Männer 40" in page.locator('#participant-form [name="category_id"]').inner_text()
+    assert "M40 – Men 40" in page.locator('#participant-form [name="category_id"]').inner_text()
     page.locator('#station-form [name="station_id"]').fill("1")
     page.locator('#station-form [name="display_name"]').fill("Fox 1")
     page.locator("#station-form button").click()
@@ -166,6 +174,7 @@ def test_browser_language_and_rfid_create_confirm_history_collision(
     page.locator("#language").select_option("de")
     assert page.locator("html").get_attribute("lang") == "de"
     assert "Startnummer" in page.locator("#participant-form").inner_text()
+    assert "M40 – Männer 40" in page.locator('#participant-form [name="category_id"]').inner_text()
     assert "Fuchs" in page.locator('#station-form [name="role"]').inner_text()
     assert "RFID-Tag einlesen" in page.locator("#read-tag").inner_text()
     page.reload()
@@ -176,8 +185,10 @@ def test_browser_language_and_rfid_create_confirm_history_collision(
     page.wait_for_function("() => document.documentElement.lang === 'en'")
     page.locator("#language").select_option("de")
     page.locator('#participant-form [name="start_number"]').fill("18")
-    page.locator('#participant-form [name="first_name"]').fill("Anna")
-    page.locator('#participant-form [name="last_name"]').fill("Meyer")
+    page.locator("#create-runner").click()
+    page.locator('#participant-form [data-person="first_name"]').fill("Anna")
+    page.locator('#participant-form [data-person="last_name"]').fill("Meyer")
+    page.locator('#participant-form [data-person="birth_year"]').fill("1980")
     page.locator('#participant-form [name="category_id"]').select_option(label="M40 – Männer 40")
     page.locator("#participant-form details").first.locator("summary").click()
     page.locator('#participant-form [name="uid"]').fill("046365525C6180")
@@ -249,6 +260,7 @@ def test_browser_native_times_preserve_instant_and_require_dst_choice(
     )
     page.locator("#event-form button").first.click()
     page.wait_for_function("() => document.querySelector('#error').hidden")
+    page.wait_for_function("() => !document.querySelector('#event-form').dataset.saving")
     assert (
         page.request.get("/api/events").json()[0]["competition_start_at"]
         == saved["competition_start_at"]
@@ -261,3 +273,82 @@ def test_browser_native_times_preserve_instant_and_require_dst_choice(
         page.request.get("/api/events").json()[0]["competition_start_at"]
         == saved["competition_start_at"]
     )
+
+
+def test_browser_reusable_runner_club_category_and_unknown_registration(
+    desk: tuple[Any, str, Callable[[str], None]],
+) -> None:
+    page, _, punch = desk
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.locator('#club-form [name="code"]').fill("P01")
+    page.locator('#club-form [name="display_name"]').fill("Ortsverband Test")
+    page.locator("#club-form button").first.click()
+    page.wait_for_function(
+        "() => document.querySelector('#participant-form [data-person=club_id]').options.length === 2"
+    )
+    save_event(page)
+    category_and_participant(page)
+    page.locator('#participant-form [data-person="club_id"]').select_option(
+        label="P01 – Ortsverband Test"
+    )
+    page.get_by_role("button", name="Save participant", exact=True).click()
+    page.wait_for_function(
+        "() => !document.querySelector('#participant-form').dataset.saving && document.querySelector('#participant-form').dataset.entityId"
+    )
+    first = page.request.get("/api/participants?event_id=1").json()[0]
+    page.reload()
+    page.locator('[data-edit-participant="1"]').click()
+    assert page.locator("#runner-choice").input_value() == str(first["runner_id"])
+    assert "1980" in page.locator("#runner-choice").inner_text()
+    assert "P01" in page.locator("#runner-choice").inner_text()
+    page.locator('#participant-form [name="checked_in"]').check()
+    page.get_by_role("button", name="Save participant", exact=True).click()
+    page.wait_for_function("() => !document.querySelector('#participant-form').dataset.saving")
+    page.locator('[data-state="RUNNING"]').click()
+    page.wait_for_function(
+        "() => document.querySelector('#event-state').textContent.includes('Running')"
+    )
+    page.locator('[data-state="CLOSED"]').click()
+    page.wait_for_function(
+        "() => document.querySelector('#event-state').textContent.includes('Closed')"
+    )
+    page.locator("#new-event").click()
+    save_event(page)
+    page.wait_for_function("() => document.querySelector('#event-select').value === '2'")
+    page.locator('#category-form [name="category_id"]').select_option(label="M40 – Men 40")
+    page.locator("#category-form button").first.click()
+    page.wait_for_function(
+        "() => document.querySelector('#participant-form [name=category_id]').options.length === 2"
+    )
+    page.locator('#station-form [name="station_id"]').fill("1")
+    page.locator('#station-form [name="display_name"]').fill("Fox 1")
+    page.locator("#station-form button").click()
+    page.locator('[data-state="RUNNING"]').click()
+    page.wait_for_function(
+        "() => document.querySelector('#event-state').textContent.includes('Running')"
+    )
+    punch("04CC")
+    page.locator("[data-register-tag]").first.click()
+    page.locator("#runner-search").fill("Müller 1980 P01")
+    page.locator("#runner-choice").select_option(label="Max Müller · 1980 · P01 – Ortsverband Test")
+    page.locator('#participant-form [name="start_number"]').fill("42")
+    page.locator('#participant-form [name="category_id"]').select_option(label="M40 – Men 40")
+    page.once("dialog", lambda dialog: dialog.accept())
+    with page.expect_event("dialog"):
+        page.locator("#confirm-tag").click()
+    page.wait_for_function(
+        "() => document.querySelector('#participant-form').dataset.entityId === '2'"
+    )
+    second = page.request.get("/api/participants?event_id=2").json()[0]
+    assert second["runner_id"] == first["runner_id"] and second["uid"] == "04CC"
+    assert second["start_number"] == 42 and second["checked_in"]
+    assert page.request.get("/api/participants?event_id=1").json()[0]["uid"] is None
+    assert page.request.get("/api/rankings?event_id=2").json()[0]["controls"] == 1
+    assert len(page.request.get("/api/runners").json()) == 1
+    assert len(page.request.get("/api/master/categories").json()) == 1
+    assert len(page.request.get("/api/source-punches").json()) == 1
+    page.locator("#language").select_option("de")
+    assert "Teilnehmer melden" in page.locator("#participant-form").inner_text()
+    assert "M40 – Männer 40" in page.locator("#participant-form [name=category_id]").inner_text()
+    assert not errors

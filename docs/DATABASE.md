@@ -1,4 +1,4 @@
-# SQLite schema, version 3
+# SQLite schema, version 4
 
 One sqlite3 connection belongs to the ingest loop thread. WAL, synchronous FULL, foreign keys and a 5s busy timeout are enabled. Ordered SQL migrations run under BEGIN IMMEDIATE; `schema_migrations(version)` tracks applied IDs. Unknown/future or noncontiguous versions are rejected. Table creation is exclusively migration-driven.
 
@@ -69,6 +69,9 @@ do not trigger automatic resend. Diagnostic status contains last persisted state
 
 ## M3 migration and immutable interpretation boundary
 
+The following describes original migration 3. Migration 4 below supersedes its event-local
+registration/cache tables without rewriting the migration or deleting those historical records.
+
 Migrations 1 and 2 are unchanged. Additive migration 3 creates only `live_*` tables/indexes; a genuine
 v2 upgrade test checks preserved raw/punch facts and foreign keys. FoxBridge tables are untouched.
 Back up before opening with 0.3.0: older M1/M2 binaries reject schema 3. No downgrade is implemented.
@@ -108,6 +111,47 @@ DNS/DNF/DSQ preserve data but are unranked. Administrative updates and recalcula
 atomically. UID/category/status/station/lifecycle/exclusion history is retained; post-close actions
 carry an `after_close:` audit prefix. No destructive participant/category/event deletion exists:
 deactivate or archive. A reasoned exclusion is not deletion of a source punch.
+
+## M3 registration correction — additive migration 4
+
+| Current table | Purpose |
+| --- | --- |
+| live_clubs | Reusable generated ID, optional unique nonblank code/DOK, name and active flag |
+| live_runners | Reusable generated ID, person names, birth_year, optional birth_date, club FK, active flag and UTC creation/update times |
+| live_category_master | Generated ID, code, English/German names, active flag and legacy needs_review flag |
+| live_event_categories | Event/category composite key, enabled/order and event-specific code/bilingual name snapshots |
+| live_entries | Generated entry ID, event/runner/category references, event start number/UID/start/status/active/check-in, person/club/birth snapshots and UTC creation/update times |
+| live_entry_interpretations | Derived event/punch status/role/reason and event-entry FK; immutable source association remains live_event_punches |
+| live_entry_results | Rebuildable typed result cache referencing event entries; API participant_id means entry ID |
+| live_master_audit | UTC operator/action/entity/before/after for reusable person/club/category changes |
+
+Runner owns no RFID, start number, competition category/status or start time. EventEntry owns them.
+`live_entry_runner` and `live_entry_uid` are partial unique indexes among active entries per event;
+event start numbers are unique even for inactive entries. Event/category and interpretation/result
+foreign keys enforce event scoping. Check-in is independent of scoring. Master activity controls
+availability for new selections; it does not deactivate existing registrations/category selections.
+New category codes must not conflict with any existing master, including legacy review records.
+`live_master_category_code` enforces uniqueness of reviewed/new codes; duplicate old codes are
+preserved with needs_review rather than silently merged. Club codes are unique when nonblank.
+
+Migration copies each old participant into one runner and one entry, preserving entry IDs. Names
+alone cannot prove person identity; automatic merging is unsafe and not supplied. Birth data is
+NULL for legacy records, displayed as unknown, and must be completed when editing the person.
+Distinct exact old club text creates clubs with unknown DOK. Each old category becomes a master
+plus event selection; exact names are copied into both languages because their language is unknown.
+All legacy categories are marked for review. IDs and existing result JSON remain aligned; derived
+cache contents are copied and can be deterministically rebuilt. Old live_categories,
+live_participants, live_punch_interpretations and live_results remain untouched as legacy snapshots.
+Existing event/source associations, exclusions, audit, cursors, FoxCore and FoxBridge tables remain.
+Schema 4 has no downgrade; earlier binaries reject it. Back up first.
+
+Registration edits audit/recalculate only the affected event. Runner/category master edits do not
+silently rewrite existing registration/category label snapshots. New registrations use current
+master data; deliberate runner reassignment refreshes person snapshots and is event-audited.
+Inline runner+entry creation and CSV master/entry/audit changes use a single BEGIN IMMEDIATE
+transaction, so a validation/storage failure cannot leave an orphan person or partially import.
+Bulk ranking queries remain independent of participant count; no per-runner joins occur in live
+scoring. All accepted timing, duplicate, exclusion and tie semantics remain unchanged.
 
 ## Backup
 

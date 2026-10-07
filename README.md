@@ -18,7 +18,7 @@ raw-first SQLite persistence/migrations, retained duplicates, mapping foundation
 TimeSync, replay, simulator and CLI. Its physical hardware acceptance was supplied by the user.
 M2 adds explicit UID/SI-card and station/control mappings, extended D3 AUTOSEND encoding, explicit
 timezone handling, serial/binary-capture output and persistent delivery audit/idempotency.
-M3 adds event-scoped categories, registration/UID assignment, station roles, deterministic timing and
+M3 adds reusable runners/clubs/categories, event registration/UID assignment, station roles, deterministic timing and
 distinct-controls/time rankings, corrections/audit, CSV and an offline local browser desk. FoxLive is
 a sibling consumer of FoxCore, not a FoxBridge client. No cloud, telemetry, CDN or frontend build exists.
 
@@ -109,8 +109,13 @@ only, never competition timestamps, event timezone or protocol data. Native date
 localized captions and safe explicit DST choices; the prefilled IANA timezone is in advanced settings
 (existing/saved/browser timezone, Europe/Berlin on appropriately configured German PCs).
 
-Create an event and timing mode, categories with code/name (IDs are automatic), participants by
-**Start number / Startnummer**, and CONTROL/START/FINISH stations. Category dropdowns show code – name.
+Create reusable categories with code and English/German names under **Reusable data / Stammdaten**.
+Create an event and timing mode, enable its categories, and configure CONTROL/START/FINISH stations.
+Use **Add participant / Teilnehmer melden**: search an existing runner by name/birth year/club/DOK,
+or create a runner inline with birth year (optional full date), then assign **Start number / Startnummer**,
+category and start time. Category dropdowns show code – localized name. All internal keys are generated.
+Runner is a reusable person; EventEntry is their registration for one event. UID belongs to EventEntry,
+so the same person or tag may be reused in later events without changing historical assignments.
 Use **Read RFID tag / RFID-Tag einlesen**, punch the tag, review station/time and confirm assignment.
 Recent unassigned tags are selectable; manual UID entry is an advanced fallback. Assigned tags cannot
 be silently moved from another active participant. Then start the event.
@@ -129,7 +134,9 @@ historical punch selection by tag/station/time (internal references are hidden i
 Recalculation never calls the append-only FoxCore raw replay.
 WebSockets signal snapshot refreshes; no browser refresh is needed for new punches or ranking changes.
 M3 assumes one trusted local operator process; non-local binding has no authentication and is unsafe
-on untrusted networks. Back up the DB and TOML before upgrading to migration 3; older binaries reject it.
+on untrusted networks. Back up the DB and TOML before upgrading to migration 4; older binaries reject it.
+Legacy registrations are preserved conservatively as separate runners with unknown birth data;
+legacy category names/codes need review. No identity is silently merged or birth information invented.
 See [FoxLive](docs/FOXLIVE.md) for complete rules, offline test workflow, API and Windows smoke checklist.
 
 ## Development and architecture

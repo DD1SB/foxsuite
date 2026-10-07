@@ -1,8 +1,8 @@
 """Event administration, durable association, audit and derived-only recalculation."""
 
 import json
-import sqlite3
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 from foxcore.errors import error_message
@@ -13,10 +13,17 @@ from foxcore.protocol import normalize_uid
 from .models import (
     Category,
     CategoryData,
+    Club,
+    ClubData,
     Entry,
     EntryData,
     Event,
+    EventCategoryData,
     EventData,
+    MasterCategory,
+    RegistrationData,
+    Runner,
+    RunnerData,
     State,
     Station,
     StationData,
@@ -140,34 +147,168 @@ class LiveService:
         self.notify(event_id, "event_state_changed")
         return after
 
+    def _master_audit(self, action: str, entity_id: int, before: Any, after: Any) -> None:
+        self.repo.db.execute(
+            "INSERT INTO live_master_audit(created_at,operator,action,entity_id,before_json,after_json) VALUES (?,?,?,?,?,?)",
+            (
+                timestamp(),
+                self.operator,
+                action,
+                entity_id,
+                json.dumps(before, sort_keys=True),
+                json.dumps(after, sort_keys=True),
+            ),
+        )
+
+    def put_club(self, data: ClubData, club_id: int | None = None) -> Club:
+        current = next((c for c in self.repo.clubs() if c.id == club_id), None)
+        if club_id is not None and current is None:
+            raise ValueError("Club does not exist")
+        data = data.model_copy(
+            update={"code": data.code.strip(), "display_name": data.display_name.strip()}
+        )
+        if not data.display_name:
+            raise ValueError("Club name cannot be blank")
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            if data.code and any(
+                c.code == data.code and c.id != club_id for c in self.repo.clubs()
+            ):
+                raise ValueError("Club code already exists")
+            values = data.model_dump(mode="json")
+            if club_id is None:
+                club_id = self._insert("live_clubs", values)
+            else:
+                self._update("live_clubs", values, club_id)
+            club = Club(id=club_id, **values)
+            self._master_audit(
+                "club", club_id, current.model_dump() if current else None, club.model_dump()
+            )
+        self.publish("master_data_changed", None, {})
+        return club
+
+    def validate_runner(self, data: RunnerData) -> RunnerData:
+        values = data.model_dump()
+        values.update(first_name=data.first_name.strip(), last_name=data.last_name.strip())
+        if not values["first_name"] or not values["last_name"]:
+            raise ValueError("Runner names cannot be blank")
+        if data.birth_date:
+            try:
+                born = date.fromisoformat(data.birth_date)
+            except ValueError as exc:
+                raise ValueError("Invalid birth date") from exc
+            if born > date.today():
+                raise ValueError("Birth date cannot be in the future")
+            if data.birth_year is not None and data.birth_year != born.year:
+                raise ValueError("Birth year does not match birth date")
+            values.update(birth_year=born.year, birth_date=born.isoformat())
+        if values["birth_year"] is None:
+            raise ValueError("Birth year or birth date is required")
+        if values["birth_year"] > date.today().year:
+            raise ValueError("Birth year cannot be in the future")
+        if data.club_id is not None and not any(c.id == data.club_id for c in self.repo.clubs()):
+            raise ValueError("Club does not exist")
+        return RunnerData.model_validate(values)
+
+    def _put_runner(self, data: RunnerData, runner_id: int | None = None) -> Runner:
+        current = self.repo.runner(runner_id) if runner_id else None
+        data = self.validate_runner(data)
+        values = data.model_dump(mode="json") | {"updated_at": timestamp()}
+        if runner_id is None:
+            runner_id = self._insert("live_runners", values | {"created_at": timestamp()})
+        else:
+            self._update("live_runners", values, runner_id)
+        runner = self.repo.runner(runner_id)
+        self._master_audit(
+            "runner", runner_id, current.model_dump() if current else None, runner.model_dump()
+        )
+        return runner
+
+    def put_runner(self, data: RunnerData, runner_id: int | None = None) -> Runner:
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            runner = self._put_runner(data, runner_id)
+        self.publish("master_data_changed", None, {})
+        return runner
+
+    def put_master_category(
+        self, data: CategoryData, category_id: int | None = None
+    ) -> MasterCategory:
+        current = next((c for c in self.repo.master_categories() if c.id == category_id), None)
+        if category_id is not None and current is None:
+            raise ValueError("Category does not exist")
+        values = data.model_dump(mode="json")
+        for key in ("code", "display_name_en", "display_name_de"):
+            values[key] = values[key].strip()
+            if not values[key]:
+                raise ValueError("Category code/name cannot be blank")
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            if any(
+                c.code == values["code"] and c.id != category_id
+                for c in self.repo.master_categories()
+            ):
+                raise ValueError(f"Category code {values['code']} already exists")
+            values["needs_review"] = False
+            if category_id is None:
+                category_id = self._insert("live_category_master", values)
+            else:
+                self._update("live_category_master", values, category_id)
+            category = MasterCategory(id=category_id, **values)
+            self._master_audit(
+                "category",
+                category_id,
+                current.model_dump() if current else None,
+                category.model_dump(),
+            )
+        self.publish("master_data_changed", None, {})
+        return category
+
     def put_category(
-        self, event_id: int, data: CategoryData, category_id: int | None = None
+        self, event_id: int, data: EventCategoryData, category_id: int | None = None
     ) -> Category:
         self.mutable(event_id)
         current = next((c for c in self.repo.categories(event_id) if c.id == category_id), None)
         if category_id is not None and current is None:
             raise ValueError("Category does not exist in this event")
-        if not data.code.strip() or not data.display_name.strip():
-            raise ValueError("Category code/name cannot be blank")
-        try:
-            with self.repo.db:
-                self.repo.db.execute("BEGIN IMMEDIATE")
-                values = data.model_dump(mode="json")
-                if category_id is None:
-                    category_id = self._insert("live_categories", values | {"event_id": event_id})
-                else:
-                    self._update("live_categories", values, category_id)
-                category = next(c for c in self.repo.categories(event_id) if c.id == category_id)
-                self._audit(
+        if category_id is not None and category_id != data.category_id:
+            raise ValueError(
+                "Category selection cannot be changed; enable another category instead"
+            )
+        master = next((c for c in self.repo.master_categories() if c.id == data.category_id), None)
+        if master is None:
+            raise ValueError("Category does not exist")
+        if current is None and not master.active:
+            raise ValueError("Category is inactive")
+        current = next(
+            (c for c in self.repo.categories(event_id) if c.id == data.category_id), current
+        )
+        if any(c.code == master.code and c.id != master.id for c in self.repo.categories(event_id)):
+            raise ValueError(f"Category code {master.code} already exists")
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            self.repo.db.execute(
+                "INSERT INTO live_event_categories VALUES (?,?,?,?,?,?,?) ON CONFLICT(event_id,category_id) "
+                "DO UPDATE SET enabled=excluded.enabled,display_order=excluded.display_order",
+                (
                     event_id,
-                    "category",
-                    str(category_id),
-                    current.model_dump(mode="json") if current else None,
-                    category.model_dump(mode="json"),
-                )
-                self._calculate(event_id)
-        except sqlite3.IntegrityError as exc:
-            raise ValueError(f"Category code {data.code} already exists") from exc
+                    master.id,
+                    data.enabled,
+                    data.display_order,
+                    master.code,
+                    master.display_name_en,
+                    master.display_name_de,
+                ),
+            )
+            category = next(c for c in self.repo.categories(event_id) if c.id == master.id)
+            self._audit(
+                event_id,
+                "category",
+                str(master.id),
+                current.model_dump() if current else None,
+                category.model_dump(),
+            )
+            self._calculate(event_id)
         self.notify(event_id, "ranking_changed")
         return category
 
@@ -175,10 +316,19 @@ class LiveService:
         self, event_id: int, data: EntryData, entry_id: int | None = None
     ) -> EntryData:
         event = self.mutable(event_id)
-        if data.category_id not in {c.id for c in self.repo.categories(event_id)}:
+        current = next((e for e in self.repo.entries(event_id) if e.id == entry_id), None)
+        if entry_id is not None and current is None:
+            raise ValueError("Participant does not exist in this event")
+        category = next(
+            (c for c in self.repo.categories(event_id) if c.id == data.category_id), None
+        )
+        if category is None:
             raise ValueError("Category does not exist in this event")
-        if not data.first_name.strip() or not data.last_name.strip():
-            raise ValueError("Participant names cannot be blank")
+        if not category.enabled and (current is None or current.category_id != data.category_id):
+            raise ValueError("Category is not enabled for this event")
+        runner = self.repo.runner(data.runner_id)
+        if not runner.active and (current is None or current.runner_id != runner.id):
+            raise ValueError("Runner is inactive")
         uid = normalize_uid(data.uid) if data.uid else None
         start = instant(data.start_time, event.timezone)
         seconds = unix(start)
@@ -193,6 +343,8 @@ class LiveService:
                 raise ValueError(
                     f"UID {uid} is already assigned to participant {entry.start_number}"
                 )
+            if data.active and entry.active and entry.runner_id == data.runner_id:
+                raise ValueError("Runner is already registered in this event")
         return data.model_copy(update={"uid": uid, "start_time": start})
 
     def _put_entry(self, event_id: int, data: EntryData, entry_id: int | None = None) -> Entry:
@@ -200,12 +352,27 @@ class LiveService:
         if entry_id is not None and current is None:
             raise ValueError("Participant does not exist in this event")
         values = data.model_dump(mode="json") | {"updated_at": timestamp()}
+        if current is None or current.runner_id != data.runner_id:
+            runner = self.repo.runner(data.runner_id)
+            values.update(
+                {
+                    key: getattr(runner, key)
+                    for key in (
+                        "first_name",
+                        "last_name",
+                        "birth_year",
+                        "birth_date",
+                        "club",
+                        "club_code",
+                    )
+                }
+            )
         if entry_id is None:
             entry_id = self._insert(
-                "live_participants", values | {"event_id": event_id, "created_at": timestamp()}
+                "live_entries", values | {"event_id": event_id, "created_at": timestamp()}
             )
         else:
-            self._update("live_participants", values, entry_id)
+            self._update("live_entries", values, entry_id)
         entry = next(e for e in self.repo.entries(event_id) if e.id == entry_id)
         self._audit(
             event_id,
@@ -214,6 +381,22 @@ class LiveService:
             current.model_dump(mode="json") if current else None,
             entry.model_dump(mode="json"),
         )
+        return entry
+
+    def register_new_runner(
+        self, event_id: int, runner_data: RunnerData, data: RegistrationData
+    ) -> Entry:
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            self.mutable(event_id)
+            runner = self._put_runner(runner_data)
+            entry_data = self.validate_entry(
+                event_id, EntryData(runner_id=runner.id, **data.model_dump())
+            )
+            entry = self._put_entry(event_id, entry_data)
+            self._calculate(event_id)
+        self.publish("master_data_changed", None, {})
+        self.notify(event_id, "participant_updated", {"participant_id": entry.id})
         return entry
 
     def put_entry(self, event_id: int, data: EntryData, entry_id: int | None = None) -> Entry:
@@ -273,20 +456,20 @@ class LiveService:
         )
         for item in calculation.interpretations:
             self.repo.db.execute(
-                "INSERT INTO live_punch_interpretations VALUES (?,?,?,?,?,?) ON CONFLICT(event_id,punch_id) "
+                "INSERT INTO live_entry_interpretations VALUES (?,?,?,?,?,?) ON CONFLICT(event_id,punch_id) "
                 "DO UPDATE SET participant_id=excluded.participant_id,status=excluded.status,role=excluded.role,reason=excluded.reason",
                 (event_id, item.punch_id, item.participant_id, item.status, item.role, item.reason),
             )
         for result in calculation.results:
             self.repo.db.execute(
-                "INSERT INTO live_results VALUES (?,?,?) ON CONFLICT(event_id,participant_id) "
+                "INSERT INTO live_entry_results VALUES (?,?,?) ON CONFLICT(event_id,participant_id) "
                 "DO UPDATE SET payload=excluded.payload",
                 (event_id, result.participant_id, result.model_dump_json()),
             )
         existing = self.repo.results(event_id)
         previous = {r.participant_id: r.model_dump_json() for r in existing}
         self.repo.db.executemany(
-            "UPDATE live_results SET payload=? WHERE event_id=? AND participant_id=?",
+            "UPDATE live_entry_results SET payload=? WHERE event_id=? AND participant_id=?",
             [
                 (r.model_dump_json(), event_id, r.participant_id)
                 for r in DistinctControlsThenTime().calculate(existing)
@@ -370,7 +553,7 @@ class LiveService:
             self.publish("participant_updated", event.id, {"uid": punch.uid})
             if (
                 self.repo.db.execute(
-                    "SELECT status FROM live_punch_interpretations WHERE event_id=? AND punch_id=?",
+                    "SELECT status FROM live_entry_interpretations WHERE event_id=? AND punch_id=?",
                     (event.id, punch.id),
                 ).fetchone()[0]
                 == "UNKNOWN_UID"
@@ -444,7 +627,7 @@ class LiveService:
         unknown = [
             dict(r)
             for r in self.repo.db.execute(
-                "SELECT p.uid,p.station_id,p.station_timestamp,p.id FROM live_punch_interpretations i JOIN punches p "
+                "SELECT p.uid,p.station_id,p.station_timestamp,p.id FROM live_entry_interpretations i JOIN punches p "
                 "ON p.id=i.punch_id WHERE i.event_id=? AND i.status='UNKNOWN_UID' ORDER BY p.station_timestamp DESC,p.id DESC LIMIT 500",
                 (event_id,),
             )

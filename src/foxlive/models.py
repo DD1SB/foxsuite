@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class State(StrEnum):
@@ -76,35 +76,109 @@ class Event(EventData):
     updated_at: str
 
 
-class CategoryData(Model):
-    code: str = Field(min_length=1, max_length=30)
+class ClubData(Model):
+    code: str = Field(default="", max_length=50)
     display_name: str = Field(min_length=1, max_length=200)
     active: bool = True
+
+
+class Club(ClubData):
+    id: int
+
+
+class RunnerData(Model):
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    birth_year: int | None = Field(default=None, ge=1, le=9999)
+    birth_date: str | None = None
+    club_id: int | None = Field(default=None, ge=1)
+    active: bool = True
+
+
+class Runner(RunnerData):
+    id: int
+    club: str = ""
+    club_code: str = ""
+    created_at: str
+    updated_at: str
+
+
+class CategoryData(Model):
+    code: str = Field(min_length=1, max_length=30)
+    display_name_en: str = Field(min_length=1, max_length=200)
+    display_name_de: str = Field(min_length=1, max_length=200)
+    active: bool = True
+
+
+class MasterCategory(CategoryData):
+    id: int
+    needs_review: bool = False
+
+
+class EventCategoryData(Model):
+    category_id: int = Field(ge=1)
+    enabled: bool = True
     display_order: int = 0
 
 
-class Category(CategoryData):
-    id: int
+class EventCategory(EventCategoryData):
     event_id: int
+    code: str
+    display_name_en: str
+    display_name_de: str
+
+    @computed_field  # type: ignore[prop-decorator]  # Pydantic serializes scoring aliases.
+    @property
+    def id(self) -> int:
+        return self.category_id
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def active(self) -> bool:
+        return self.enabled
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def display_name(self) -> str:
+        return self.display_name_en
 
 
-class EntryData(Model):
+class RegistrationData(Model):
     start_number: int = Field(ge=1, le=1000000000)
-    first_name: str = Field(min_length=1, max_length=100)
-    last_name: str = Field(min_length=1, max_length=100)
     category_id: int = Field(ge=1)
     uid: str | None = None
-    club: str = Field(default="", max_length=200)
     start_time: str | None = None
     manual_status: CompetitionStatus | None = None
     active: bool = True
+    checked_in: bool = False
 
 
-class Entry(EntryData):
+class EventEntryData(RegistrationData):
+    runner_id: int = Field(ge=1)
+
+
+class EventEntry(EventEntryData):
     id: int
     event_id: int
+    first_name: str
+    last_name: str
+    birth_year: int | None = None
+    birth_date: str | None = None
+    club: str = ""
+    club_code: str = ""
     created_at: str
     updated_at: str
+
+    def registration(self) -> EventEntryData:
+        return EventEntryData.model_validate(
+            self.model_dump(include=set(EventEntryData.model_fields))
+        )
+
+
+# Existing Python/HTTP names remain useful; these now mean event registrations/selections.
+EntryData = EventEntryData
+Entry = EventEntry
+Category = EventCategory
 
 
 class StationData(Model):

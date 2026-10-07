@@ -76,6 +76,16 @@ does not even open the output endpoint. Explicit output replay can duplicate an 
 
 ## FoxLive boundaries and lifecycle
 
+Registration separates reusable Runner, Club/DOK and bilingual Category master data from EventEntry
+and EventCategory. UID resolution and scoring use active entries in the selected event, never a
+runner's global identity. Entries snapshot person/club fields and event categories snapshot labels
+so master edits cannot rewrite history. Master changes have a separate audit; event changes retain
+the existing audit/recalculation transaction. Inline new-runner registration is a single transaction.
+Additive migration 4 preserves old event-local tables and creates corrected tables/caches; association,
+exclusion, event lifecycle/cursors and all FoxCore source facts remain unchanged. No new serial/parser
+path or change to ranking/timing rules is introduced. Ambiguous legacy identity/code data is retained
+and flagged rather than automatically merged.
+
 `models` and `scoring` define typed domain inputs and pure deterministic rules; `persistence` reads
 facts in bulk and supplies event-scoped repositories; `service` owns association, administration,
 recalculation and audit; `csvio` supplies atomic registration import/export. `web` composes accepted

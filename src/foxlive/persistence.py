@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from foxcore.events import Punch
 from foxcore.persistence import Store
 
-from .models import Category, Entry, Event, Result, Station
+from .models import Category, Club, Entry, Event, MasterCategory, Result, Runner, Station
 
 
 def source_punch(row: sqlite3.Row) -> Punch:
@@ -60,7 +60,7 @@ class LiveRepository:
         return [
             Category.model_validate(dict(r))
             for r in self.db.execute(
-                "SELECT * FROM live_categories WHERE event_id=? ORDER BY display_order,code,id",
+                "SELECT * FROM live_event_categories WHERE event_id=? ORDER BY display_order,code,category_id",
                 (event_id,),
             )
         ]
@@ -69,9 +69,53 @@ class LiveRepository:
         return [
             Entry.model_validate(dict(r))
             for r in self.db.execute(
-                "SELECT * FROM live_participants WHERE event_id=? ORDER BY start_number,id",
+                "SELECT * FROM live_entries WHERE event_id=? ORDER BY start_number,id",
                 (event_id,),
             )
+        ]
+
+    def clubs(self) -> list[Club]:
+        return [
+            Club.model_validate(dict(r))
+            for r in self.db.execute("SELECT * FROM live_clubs ORDER BY code,display_name,id")
+        ]
+
+    def master_categories(self) -> list[MasterCategory]:
+        return [
+            MasterCategory.model_validate(dict(r))
+            for r in self.db.execute("SELECT * FROM live_category_master ORDER BY code,id")
+        ]
+
+    def runners(self, search: str = "", limit: int | None = None) -> list[Runner]:
+        rows = self.db.execute(
+            "SELECT r.*,COALESCE(c.display_name,'') AS club,COALESCE(c.code,'') AS club_code "
+            "FROM live_runners r LEFT JOIN live_clubs c ON c.id=r.club_id "
+            "ORDER BY r.last_name,r.first_name,r.birth_year,r.id"
+        )
+        terms = search.casefold().split()
+        result = []
+        for row in rows:
+            runner = Runner.model_validate(dict(row))
+            label = f"{runner.first_name} {runner.last_name} {runner.birth_year or ''} {runner.club} {runner.club_code}".casefold()
+            if all(t in label for t in terms):
+                result.append(runner)
+                if limit is not None and len(result) >= limit:
+                    break
+        return result
+
+    def runner(self, runner_id: int) -> Runner:
+        row = self.db.execute(
+            "SELECT r.*,COALESCE(c.display_name,'') AS club,COALESCE(c.code,'') AS club_code "
+            "FROM live_runners r LEFT JOIN live_clubs c ON c.id=r.club_id WHERE r.id=?",
+            (runner_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Runner does not exist")
+        return Runner.model_validate(dict(row))
+
+    def master_audit(self) -> list[dict[str, Any]]:
+        return [
+            dict(r) for r in self.db.execute("SELECT * FROM live_master_audit ORDER BY id DESC")
         ]
 
     def stations(self, event_id: int) -> list[Station]:
@@ -98,7 +142,7 @@ class LiveRepository:
         return [
             Result.model_validate_json(r[0])
             for r in self.db.execute(
-                "SELECT payload FROM live_results WHERE event_id=? ORDER BY participant_id",
+                "SELECT payload FROM live_entry_results WHERE event_id=? ORDER BY participant_id",
                 (event_id,),
             )
         ]
@@ -133,9 +177,9 @@ class LiveRepository:
         query = (
             "SELECT p.*,i.participant_id,i.status,i.role,i.reason,e.start_number,e.first_name,e.last_name,"
             "c.code AS category,s.display_name AS station_name FROM live_event_punches a "
-            "JOIN punches p ON p.id=a.punch_id LEFT JOIN live_punch_interpretations i "
-            "ON i.event_id=a.event_id AND i.punch_id=a.punch_id LEFT JOIN live_participants e "
-            "ON e.id=i.participant_id LEFT JOIN live_categories c ON c.id=e.category_id "
+            "JOIN punches p ON p.id=a.punch_id LEFT JOIN live_entry_interpretations i "
+            "ON i.event_id=a.event_id AND i.punch_id=a.punch_id LEFT JOIN live_entries e "
+            "ON e.id=i.participant_id LEFT JOIN live_event_categories c ON c.category_id=e.category_id AND c.event_id=e.event_id "
             "LEFT JOIN live_event_stations s ON s.event_id=a.event_id AND s.station_id=p.station_id "
             f"WHERE {where} ORDER BY p.station_timestamp DESC,p.id DESC LIMIT ?"
         )

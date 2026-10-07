@@ -1,5 +1,31 @@
 # Changelog
 
+## M3 maintenance — reusable master data and event registrations
+
+Additive migration 4 separates Runner (person/birth information/Club-DOK) and global bilingual
+Category from EventEntry (start number/category/RFID/status/start/check-in) and EventCategory.
+Generated references remain hidden behind human-facing selections. One active registration per
+runner/event, unique event start numbers and active event tags are enforced. Tags and runners can
+be reused across events; historical registration/category labels remain snapshots.
+
+Event registration offers searchable existing runners or atomic inline person creation, retaining
+read/confirm RFID assignment, unknown-tag registration and deterministic reinterpretation. Reusable
+runner/club/category administration and audit are separate from event setup. EN/DE catalogs cover
+all new workflows; no age/category suggestion or federation rules were added.
+
+Migration preserves original M3 records/cache/audit/source associations. Each old registration
+becomes a separate runner with explicitly unknown birth information; old categories retain their
+names in both languages and are marked for review. Duplicate legacy codes are retained, not merged.
+CSV retains existing column names and adds birth_year, birth_date, club_code; birth information is
+required for new person imports. Ambiguous matches require manual registration; master/entry/audit
+changes commit or roll back together. Tests asserting the old event-local model were adapted;
+accepted timing/ranking/duplicate semantics and FoxCore/FoxBridge behavior are unchanged.
+
+Validation: 207 tests pass including four Chromium workflows; Ruff lint/format, strict mypy,
+sdist/wheel build, clean offline installation and installed HTTP/WebSocket/simulator/restart smoke
+pass. All 518 reference hashes remain unchanged. One unfiltered upstream Starlette warning remains.
+FoxLive physical Windows hardware acceptance remains pending. Milestone 4 has not been started.
+
 ## M3 maintenance — operator UX and EN/DE localization
 
 English-default local desk with immediate English/Deutsch selection and browser-persisted preference.

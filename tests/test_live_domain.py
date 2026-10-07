@@ -13,10 +13,14 @@ from foxcore.persistence import MIGRATIONS, Store
 from foxcore.service import IngestService
 from foxlive import csvio
 from foxlive.models import (
+    Category,
     CategoryData,
+    ClubData,
     EntryData,
+    EventCategoryData,
     EventData,
     Role,
+    RunnerData,
     State,
     StationData,
     Timing,
@@ -46,12 +50,11 @@ def setup(
             else None,
         )
     )
-    category = live.put_category(event.id, CategoryData(code="OPEN", display_name="Open"))
+    category = add_category(live, event.id, "OPEN", "Open")
+    runner = live.put_runner(RunnerData(first_name="Max", last_name="Müller", birth_year=1980))
     entry = live.put_entry(
         event.id,
-        EntryData(
-            start_number=1, first_name="Max", last_name="Müller", category_id=category.id, uid=UID
-        ),
+        EntryData(start_number=1, runner_id=runner.id, category_id=category.id, uid=UID),
     )
     for station, role in [
         (1, Role.CONTROL),
@@ -66,6 +69,15 @@ def setup(
     ingest = IngestService(store)
     ingest.subscribe(live.accept)
     return store, live, ingest, event.id, entry.id
+
+
+def add_category(live: LiveService, event: int, code: str, name: str) -> Category:
+    master = next((c for c in live.repo.master_categories() if c.code == code), None)
+    if master is None:
+        master = live.put_master_category(
+            CategoryData(code=code, display_name_en=name, display_name_de=name)
+        )
+    return live.put_category(event, EventCategoryData(category_id=master.id))
 
 
 def punch(
@@ -91,7 +103,7 @@ def statuses(live: LiveService, event: int) -> list[str]:
     return [
         r[0]
         for r in live.repo.db.execute(
-            "SELECT status FROM live_punch_interpretations WHERE event_id=? ORDER BY punch_id",
+            "SELECT status FROM live_entry_interpretations WHERE event_id=? ORDER BY punch_id",
             (event,),
         )
     ]
@@ -149,13 +161,11 @@ def test_unknown_uid_assignment_and_category_change(tmp_path: Path) -> None:
     assert statuses(live, event) == ["UNKNOWN_UID"]
     assert live.snapshot(event)["unknown"][0]["id"] == source_id
     entry = live.repo.entries(event)[0]
-    data = EntryData.model_validate(
-        entry.model_dump(exclude={"id", "event_id", "created_at", "updated_at"})
-    )
+    data = entry.registration()
     live.put_entry(event, data.model_copy(update={"uid": "04AA"}), entry_id)
     assert statuses(live, event) == ["VALID_CONTROL"]
     assert live.repo.results(event)[0].controls == 1 and live.snapshot(event)["unknown"] == []
-    second = live.put_category(event, CategoryData(code="M40", display_name="M40"))
+    second = add_category(live, event, "M40", "M40")
     live.put_entry(
         event, data.model_copy(update={"uid": "04AA", "category_id": second.id}), entry_id
     )
@@ -227,11 +237,7 @@ def test_exclusion_and_manual_status(tmp_path: Path) -> None:
     assert statuses(live, event) == ["MANUALLY_EXCLUDED"]
     assert live.repo.results(event)[0].controls == 0
     assert store.get_punch(source_id).station_timestamp == STAMP + 1
-    data = EntryData.model_validate(
-        live.repo.entries(event)[0].model_dump(
-            exclude={"id", "event_id", "created_at", "updated_at"}
-        )
-    )
+    data = live.repo.entries(event)[0].registration()
     live.put_entry(event, data.model_copy(update={"manual_status": CS.DSQ}), entry_id)
     assert live.repo.results(event)[0].status == CS.DSQ
     assert live.repo.results(event)[0].rank is None
@@ -242,11 +248,7 @@ def test_predefined_specific_default_missing_and_midnight(tmp_path: Path) -> Non
     store, live, ingest, event, entry_id = setup(
         tmp_path / "predefined.db", Timing.PREDEFINED_START
     )
-    data = EntryData.model_validate(
-        live.repo.entries(event)[0].model_dump(
-            exclude={"id", "event_id", "created_at", "updated_at"}
-        )
-    )
+    data = live.repo.entries(event)[0].registration()
     live.put_entry(
         event,
         data.model_copy(
@@ -271,7 +273,7 @@ def test_predefined_specific_default_missing_and_midnight(tmp_path: Path) -> Non
 
 def test_csv_atomic_unique_entries_and_export(tmp_path: Path) -> None:
     store, live, _, event, _ = setup(tmp_path / "csv.db")
-    bad = "start_number,first_name,last_name,category,uid\n2,Anna,Meyer,OPEN,04AA\n3,John,Smith,OPEN,04AA\n"
+    bad = "start_number,first_name,last_name,category,uid,birth_year\n2,Anna,Meyer,OPEN,04AA,1980\n3,John,Smith,OPEN,04AA,1981\n"
     summary = csvio.preview(live, event, bad)
     assert not summary["valid"] and summary["errors"][0]["row"] == 3
     assert not csvio.import_participants(live, event, bad)["valid"]
@@ -285,8 +287,9 @@ def test_csv_atomic_unique_entries_and_export(tmp_path: Path) -> None:
             event,
             EntryData(
                 start_number=4,
-                first_name="B",
-                last_name="C",
+                runner_id=live.put_runner(
+                    RunnerData(first_name="B", last_name="C", birth_year=1980)
+                ).id,
                 category_id=live.repo.categories(event)[0].id,
                 uid="04AA",
             ),
@@ -328,7 +331,11 @@ def test_v2_migration_preserves_m1_m2(tmp_path: Path) -> None:
         assert store.version == 2
         store.close()
     store = Store(path)
-    assert store.version == 3 and store.raw_events() == raw and store.get_punch(source_id) == source
+    assert (
+        store.version == len(MIGRATIONS)
+        and store.raw_events() == raw
+        and store.get_punch(source_id) == source
+    )
     assert store.db.execute("PRAGMA foreign_key_check").fetchall() == []
     store.close()
 
@@ -391,11 +398,7 @@ def test_sporting_ties_and_statuses() -> None:
 
 
 def entry_data(live: LiveService, event: int, entry: int) -> EntryData:
-    return EntryData.model_validate(
-        next(e for e in live.repo.entries(event) if e.id == entry).model_dump(
-            exclude={"id", "event_id", "created_at", "updated_at"}
-        )
-    )
+    return next(e for e in live.repo.entries(event) if e.id == entry).registration()
 
 
 def event_data(live: LiveService, event: int) -> EventData:
@@ -418,11 +421,16 @@ def test_event_history_draft_resume_and_historical_uid_reuse(tmp_path: Path) -> 
             default_start_at=datetime.fromtimestamp(STAMP, UTC).isoformat(),
         )
     )
-    category = live.put_category(second.id, CategoryData(code="OPEN", display_name="Open"))
+    category = add_category(live, second.id, "OPEN", "Open")
     live.put_entry(
         second.id,
         EntryData(
-            start_number=1, first_name="Anna", last_name="Meyer", category_id=category.id, uid=UID
+            start_number=1,
+            runner_id=live.put_runner(
+                RunnerData(first_name="Anna", last_name="Meyer", birth_year=1980)
+            ).id,
+            category_id=category.id,
+            uid=UID,
         ),
     )
     # DRAFT does not ingest, and starting does not backfill old source records.
@@ -445,7 +453,10 @@ def test_event_history_draft_resume_and_historical_uid_reuse(tmp_path: Path) -> 
 def test_uid_reassignment_affects_both_entries_and_preserves_audit(tmp_path: Path) -> None:
     store, live, ingest, event, first = setup(tmp_path / "uids.db", Timing.PREDEFINED_START)
     data = entry_data(live, event, first)
-    second = live.put_entry(event, data.model_copy(update={"start_number": 2, "uid": "04AA"}))
+    runner = live.put_runner(RunnerData(first_name="Anna", last_name="Meyer", birth_year=1980))
+    second = live.put_entry(
+        event, data.model_copy(update={"runner_id": runner.id, "start_number": 2, "uid": "04AA"})
+    )
     punch(ingest, 1, 1)
     punch(ingest, 2, 2, uid="04AA")
     with pytest.raises(ValueError, match="already assigned"):
@@ -580,7 +591,7 @@ def test_replayed_events_ignored_and_historical_association_atomic(tmp_path: Pat
 def test_derived_persistence_failure_recovers_durable_association(tmp_path: Path) -> None:
     store, live, ingest, event, _ = setup(tmp_path / "failure.db", Timing.PREDEFINED_START)
     store.db.execute(
-        "CREATE TRIGGER fail_live BEFORE INSERT ON live_punch_interpretations BEGIN SELECT RAISE(ABORT,'disk unavailable'); END"
+        "CREATE TRIGGER fail_live BEFORE INSERT ON live_entry_interpretations BEGIN SELECT RAISE(ABORT,'disk unavailable'); END"
     )
     source_id = punch(ingest, 1, 1)
     assert live.failure is not None and store.get_punch(source_id).uid == UID
@@ -608,20 +619,24 @@ def test_csv_row_errors_rollback_and_lossless_export(tmp_path: Path) -> None:
         )
         assert not summary["valid"] and summary["errors"]
         assert len(live.repo.entries(event)) == 1
-    data = entry_data(live, event, entry).model_copy(
-        update={"club": "=literal,not a formula", "first_name": "Anna, Maria"}
+    club = live.put_club(ClubData(display_name="=literal,not a formula"))
+    runner = live.put_runner(
+        RunnerData(first_name="Anna, Maria", last_name="Müller", birth_year=1980, club_id=club.id)
     )
+    data = entry_data(live, event, entry).model_copy(update={"runner_id": runner.id})
     live.put_entry(event, data, entry)
     rows = list(csv.DictReader(io.StringIO(csvio.export(live, event))))
-    assert rows[0]["club"] == data.club and rows[0]["first_name"] == data.first_name
+    assert rows[0]["club"] == club.display_name and rows[0]["first_name"] == runner.first_name
     # A mid-import DB error rolls back rows and their audits, not only the final summary.
     before_audit = live.repo.audit(event)
     store.db.execute(
-        "CREATE TRIGGER fail_second BEFORE INSERT ON live_participants WHEN NEW.start_number=3 BEGIN SELECT RAISE(ABORT,'disk unavailable'); END"
+        "CREATE TRIGGER fail_second BEFORE INSERT ON live_entries WHEN NEW.start_number=3 BEGIN SELECT RAISE(ABORT,'disk unavailable'); END"
     )
     with pytest.raises(sqlite3.IntegrityError):
         csvio.import_participants(
-            live, event, "start_number,first_name,last_name,category\n2,A,B,OPEN\n3,C,D,OPEN\n"
+            live,
+            event,
+            "start_number,first_name,last_name,category,birth_year\n2,A,B,OPEN,1980\n3,C,D,OPEN,1981\n",
         )
     assert len(live.repo.entries(event)) == 1 and live.repo.audit(event) == before_audit
     store.close()
@@ -629,8 +644,8 @@ def test_csv_row_errors_rollback_and_lossless_export(tmp_path: Path) -> None:
 
 def test_snapshot_query_count_not_per_participant(tmp_path: Path) -> None:
     store, live, _, event, _ = setup(tmp_path / "bulk.db")
-    text = "start_number,first_name,last_name,category\n" + "".join(
-        f"{i},Runner,Example,OPEN\n" for i in range(2, 202)
+    text = "start_number,first_name,last_name,category,birth_year\n" + "".join(
+        f"{i},Runner{i},Example,OPEN,1980\n" for i in range(2, 202)
     )
     assert csvio.import_participants(live, event, text)["count"] == 200
     queries: list[str] = []
@@ -646,7 +661,13 @@ def test_tied_result_csv_and_elapsed_order(tmp_path: Path) -> None:
     store, live, ingest, event, entry = setup(tmp_path / "tie-export.db", Timing.PREDEFINED_START)
     first = entry_data(live, event, entry)
     for bib, uid in [(2, "04AA"), (3, "04BB"), (4, "04CC")]:
-        live.put_entry(event, first.model_copy(update={"start_number": bib, "uid": uid}))
+        runner = live.put_runner(
+            RunnerData(first_name=f"Runner{bib}", last_name="Test", birth_year=1980)
+        )
+        live.put_entry(
+            event,
+            first.model_copy(update={"runner_id": runner.id, "start_number": bib, "uid": uid}),
+        )
     for uid, finish in [(UID, 10), ("04AA", 20), ("04BB", 20), ("04CC", 30)]:
         punch(ingest, 1, 1, uid=uid)
         punch(ingest, 11, finish, uid=uid)

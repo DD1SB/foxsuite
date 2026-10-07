@@ -82,7 +82,9 @@ def test_form_ids_generated_categories_and_native_controls(tmp_path: Path) -> No
         assert 'type="date"' in html and "Local ISO time" not in html
         event, category, _ = configure(client)
         other = request(
-            client, f"/api/events/{event}/categories", {"code": "M40", "display_name": "Men 40"}
+            client,
+            "/api/master/categories",
+            {"code": "M40", "display_name_en": "Men 40", "display_name_de": "Männer 40"},
         )
         assert category != other["id"] and other["id"] > 0
         assert (
@@ -111,8 +113,9 @@ def test_capture_next_live_uid_confirm_history_collision_and_no_source_changes(
         assert baseline["cursor"] == old
         data = {
             "start_number": 17,
-            "first_name": "Max",
-            "last_name": "Müller",
+            "runner_id": client.get(f"{root}/participants/{entry}").json()["participant"][
+                "runner_id"
+            ],
             "category_id": category,
         }
         assert client.get(root + f"/participants/{entry}").json()["participant"]["uid"] is None
@@ -185,8 +188,9 @@ def test_candidate_scope_recent_uniqueness_inactive_and_replay(tmp_path: Path) -
         assert [v["id"] for v in client.get(root + "/rfid-candidates").json()["items"]] == [newest]
         data = {
             "start_number": 17,
-            "first_name": "Max",
-            "last_name": "Müller",
+            "runner_id": client.get(f"{root}/participants/{entry}").json()["participant"][
+                "runner_id"
+            ],
             "category_id": category,
             "uid": UID,
             "active": False,

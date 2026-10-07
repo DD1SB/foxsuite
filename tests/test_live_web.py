@@ -41,11 +41,19 @@ def configure(client: TestClient) -> tuple[int, int, int]:
         },
     )["id"]
     root = f"/api/events/{event}"
-    category = request(client, root + "/categories", {"code": "OPEN", "display_name": "Open"})["id"]
+    category = request(
+        client,
+        "/api/master/categories",
+        {"code": "OPEN", "display_name_en": "Open", "display_name_de": "Offen"},
+    )["id"]
+    request(client, root + "/categories", {"category_id": category})
+    runner = request(
+        client, "/api/runners", {"first_name": "Max", "last_name": "Müller", "birth_year": 1980}
+    )["id"]
     entry = request(
         client,
         root + "/participants",
-        {"start_number": 17, "first_name": "Max", "last_name": "Müller", "category_id": category},
+        {"start_number": 17, "runner_id": runner, "category_id": category},
     )["id"]
     for station, role in [(1, "CONTROL"), (11, "FINISH")]:
         request(
@@ -101,8 +109,9 @@ def test_dashboard_crud_unknown_exclusion_and_source_immutable(tmp_path: Path) -
         assert client.get("/api/status").json()["unknown"][0]["id"] == source_id
         data = {
             "start_number": 17,
-            "first_name": "Max",
-            "last_name": "Müller",
+            "runner_id": client.get(f"{root}/participants/{entry}").json()["participant"][
+                "runner_id"
+            ],
             "category_id": category,
             "uid": UID,
         }
@@ -124,7 +133,7 @@ def test_dashboard_crud_unknown_exclusion_and_source_immutable(tmp_path: Path) -
             client.get(f"/api/punches?event_id={event}").json()[-1]["status"] == "MANUALLY_EXCLUDED"
         )
         assert request(client, root + "/recalculate", {})["MANUALLY_EXCLUDED"] == 1
-        category_data = {"code": "OPEN", "display_name": "Open renamed", "active": False}
+        category_data = {"category_id": category, "enabled": False}
         request(client, root + f"/categories/{category}", category_data, "PUT")
         assert client.get(f"/api/rankings?event_id={event}").json()[0]["rank"] is None
         request(client, root + f"/participants/{entry}", data | {"active": False}, "PUT")
@@ -201,8 +210,9 @@ def test_http_validation_origin_csv_and_restart(tmp_path: Path) -> None:
                 pass
         data = {
             "start_number": 17,
-            "first_name": "Max",
-            "last_name": "Müller",
+            "runner_id": client.get(f"{root}/participants/{entry}").json()["participant"][
+                "runner_id"
+            ],
             "category_id": category,
             "uid": UID,
         }
@@ -215,7 +225,7 @@ def test_http_validation_origin_csv_and_restart(tmp_path: Path) -> None:
             ).status_code
             == 422
         )
-        text = "start_number,first_name,last_name,category,uid\n18,Anna,Meyer,OPEN,04AA\n"
+        text = "start_number,first_name,last_name,category,uid,birth_year\n18,Anna,Meyer,OPEN,04AA,1980\n"
         assert request(client, root + "/import", {"text": text})["count"] == 1
         assert len(client.get(f"/api/participants?event_id={event}").json()) == 1
         assert request(client, root + "/import", {"text": text, "commit": True})["valid"]
@@ -355,7 +365,7 @@ def test_live_failure_never_conditions_raw_capture_on_scoring(
                 )
             else:
                 owner.store.db.execute(
-                    "CREATE TRIGGER fail_score BEFORE INSERT ON live_punch_interpretations WHEN NEW.punch_id=1 BEGIN SELECT RAISE(ABORT,'bad interpretation'); END"
+                    "CREATE TRIGGER fail_score BEFORE INSERT ON live_entry_interpretations WHEN NEW.punch_id=1 BEGIN SELECT RAISE(ABORT,'bad interpretation'); END"
                 )
             now = int(datetime.now(UTC).timestamp())
             for sequence, uid in [(1, UID), (2, "04AA"), (3, "04AA")]:

@@ -237,14 +237,28 @@ occurrence with explicit offset for DST fall-back; nonexistent spring-forward ti
 Saved unchanged times preserve their exact instant even on a language switch. Picker chrome follows
 the browser/OS locale, while captions/tables follow FoxLive's selected EN/DE language.
 
-Create categories with code and display name, such as M40 / Männer 40: all internal keys are automatic.
-Participant dropdowns show code – name; use **Start number / Startnummer** (CSV/API `start_number`).
-For RFID assignment, fill names/start number/category, click **Read RFID tag / RFID-Tag einlesen**,
+Under **Reusable data / Stammdaten**, create categories with code and English/German display names,
+and optional clubs/DOKs. Enable existing categories in event setup; no category recreation is required.
+**Add participant / Teilnehmer melden** searches people by name, birth year or club/DOK, or creates
+a runner inline (birth year or full birth date required). Then set event start number, category and
+optional start time. A runner is reusable; tag/category/start number/status belong to their event entry.
+Dropdowns show code – localized name; use **Start number / Startnummer** (CSV/API `start_number`).
+For RFID assignment, select/create runner and enter start number/category, click **Read RFID tag / RFID-Tag einlesen**,
 punch the tag, inspect the detected UID/station/time, then confirm and save. No assignment occurs
 before confirmation. You can also select a recently seen unassigned tag; manual entry/removal is an
 advanced fallback. Existing ownership by another active participant is rejected. For deliberate
 reassignment, clear the old owner's tag first; replacing the target participant's prior tag asks for
 confirmation and records history. Existing event punches are reinterpreted, never duplicated.
+The unknown-tag dashboard also offers registration for an existing/new runner; choose the detected
+tag and confirm after completing the registration. A tag used in a historical event is available
+in a new event; only active ownership within the same event is rejected. Master edits do not change
+existing event snapshots. Check-in is an organizer flag and does not affect scoring.
+
+Before schema-4 upgrade, back up SQLite/config. Migration 3 is not rewritten. Original registration
+records are retained; migrated runners have unknown birth data and are not merged based on names.
+Complete birth information in reusable-data administration before editing a migrated person.
+Migrated category names are retained in both languages, flagged for review; rename conflicting
+master codes deliberately before reuse. Existing event labels and results remain unchanged.
 Reading during DRAFT is registration only: the punch remains in FoxCore and does not silently become
 competition data. An outstanding read cancels on event/entry change, connection loss or after two
 minutes. Re-arm it after reconnect. See [FOXLIVE](FOXLIVE.md) for precise boundaries.
@@ -281,7 +295,10 @@ are UTF-8. Import preview reports all row errors; valid import commits atomicall
 See [FOXLIVE](FOXLIVE.md) for columns, rules, API and offline simulator procedure.
 
 CSV preview presents row-level problems and human-facing category/start-number labels. Column names
-remain `start_number,first_name,last_name,category,uid,club,start_time` for compatibility: `category`
+retain `start_number,first_name,last_name,category,uid,club,start_time` and add
+`birth_year,birth_date,club_code`. Supply birth_year or full birth_date for each imported runner;
+unique matching runners/clubs are reused, ambiguous matches require manual selection. All masters,
+registrations and audits commit atomically. `category`
 is the code, `uid` the RFID tag and `start_time` an ISO instant. Expanded technical details may contain
 raw source/database references in English; ordinary registration and historical selection never
 require typing database primary keys. Browser preferences are not part of the SQLite backup; exports

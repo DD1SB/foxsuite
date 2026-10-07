@@ -22,7 +22,7 @@
 <div id="error" role="alert" hidden></div>
 <section class="bar"><span id="event-state">{{ t('common.loading') }}</span><span id="connection"></span>
   <span id="sync"></span><span id="clock"></span><span id="socket"></span></section>
-<nav>{% for key, target in [('nav.dashboard','dashboard'),('nav.admin','administration'),('nav.participants','participants'),('nav.stations','stations'),('nav.audit','audit')] %}
+<nav>{% for key, target in [('nav.dashboard','dashboard'),('nav.admin','administration'),('nav.participants','participants'),('nav.master','master'),('nav.stations','stations'),('nav.audit','audit')] %}
   <a href="#{{ target }}">{{ text(key) }}</a>{% endfor %}</nav>
 <main>
 <section id="dashboard"><h2 id="event-title">{% if snapshot.event %}{{ snapshot.event.name }}{% else %}{{ t('event.begin') }}{% endif %}</h2>
@@ -44,15 +44,14 @@
 <div class="actions"><button data-state="RUNNING">{{ text('event.start') }}</button><button data-state="CLOSED">{{ text('event.close') }}</button>
  <button data-state="ARCHIVED">{{ text('event.archive') }}</button><button id="recalculate">{{ text('event.recalculate') }}</button></div>
 <form id="category-form"><h3>{{ text('category.label') }}</h3>
- <label>{{ text('category.code') }}<input name="code" required maxlength="30"></label>
- <label>{{ text('category.display_name') }}<input name="display_name" required maxlength="200"></label>
+ <label>{{ text('category.available') }}<select name="category_id" required></select></label>
  <details><summary>{{ text('common.advanced') }}</summary><label>{{ text('common.order') }}<input name="display_order" type="number" value="0"></label>
- <label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label></details>
+ <label>{{ text('common.enabled') }}<input name="enabled" type="checkbox" checked></label></details>
  <button>{{ text('category.save') }}</button><button id="new-category" type="button">{{ text('category.new') }}</button>
 </form><div id="categories"></div>
 <form id="import-form"><h3>{{ text('csv.heading') }}</h3><p>{{ text('csv.help') }}</p>
  <label>{{ text('csv.file') }}<input id="csv-file" type="file" accept=".csv,text/csv"></label>
- <label class="wide">{{ text('csv.text') }}<textarea name="text" rows="4" placeholder="start_number,first_name,last_name,category,uid,club,start_time"></textarea></label>
+ <label class="wide">{{ text('csv.text') }}<textarea name="text" rows="4" placeholder="start_number,first_name,last_name,category,uid,club,start_time,birth_year,birth_date,club_code"></textarea></label>
  <button name="action" value="preview">{{ text('csv.preview') }}</button><button name="action" value="commit">{{ text('csv.import') }}</button>
 </form><div id="import-summary" role="status"></div>
 <div class="actions"><a id="export-participants" href="#">{{ text('csv.export_participants') }}</a><a id="export-results" href="#">{{ text('csv.export_results') }}</a></div>
@@ -62,12 +61,21 @@
 </details>
 </section>
 <section id="participants"><h2>{{ text('participant.heading') }}</h2>
-<form id="participant-form">
+<form id="participant-form"><h3>{{ text('registration.heading') }}</h3><p class="wide">{{ text('registration.help') }}</p>
+ <label>{{ text('runner.search') }}<input id="runner-search" type="search" autocomplete="off"></label>
+ <label>{{ text('runner.choose') }}<select name="runner_id" id="runner-choice" required></select></label>
+ <button id="create-runner" type="button">{{ text('runner.new') }}</button><button id="select-runner" type="button">{{ text('runner.existing') }}</button>
+ <fieldset id="new-runner-fields" class="wide" hidden><legend>{{ text('runner.new') }}</legend>
+ <label>{{ text('participant.first_name') }}<input data-person="first_name" maxlength="100"></label>
+ <label>{{ text('participant.last_name') }}<input data-person="last_name" maxlength="100"></label>
+ <label>{{ text('runner.birth_year') }}<input data-person="birth_year" type="number" min="1" max="9999"></label>
+ <label>{{ text('runner.birth_date') }}<input data-person="birth_date" type="date"></label>
+ <label>{{ text('participant.club') }}<select data-person="club_id" data-club-picker></select></label>
+ </fieldset>
  <label>{{ text('participant.start_number') }}<input name="start_number" type="number" min="1" max="1000000000" required></label>
- <label>{{ text('participant.first_name') }}<input name="first_name" required maxlength="100"></label>
- <label>{{ text('participant.last_name') }}<input name="last_name" required maxlength="100"></label>
  <label>{{ text('category.label') }}<select name="category_id" required><option value="">{{ t('category.choose') }}</option></select></label>
- <label>{{ text('participant.club') }}<input name="club" maxlength="200"></label>{{ instant('start_time','participant.predefined_start') }}
+ {{ instant('start_time','participant.predefined_start') }}
+ <label>{{ text('registration.checked_in') }}<input name="checked_in" type="checkbox"></label>
  <fieldset class="wide"><legend>{{ text('rfid.label') }}</legend>
    <p id="assigned-tag"></p><button id="read-tag" type="button">{{ text('rfid.read') }}</button>
    <label>{{ text('rfid.recent') }}<select id="recent-tags"><option value="">{{ t('rfid.choose_tag') }}</option></select></label>
@@ -83,6 +91,31 @@
  <label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label></details>
  <button>{{ text('participant.save') }}</button><button id="new-participant" type="button">{{ text('participant.new') }}</button>
 </form><div id="participant-list"></div>
+</section>
+<section id="master"><h2>{{ text('master.heading') }}</h2><p>{{ text('master.help') }}</p>
+<form id="runner-form"><h3>{{ text('runner.heading') }}</h3>
+ <label>{{ text('participant.first_name') }}<input name="first_name" required maxlength="100"></label>
+ <label>{{ text('participant.last_name') }}<input name="last_name" required maxlength="100"></label>
+ <label>{{ text('runner.birth_year') }}<input name="birth_year" type="number" min="1" max="9999"></label>
+ <label>{{ text('runner.birth_date') }}<input name="birth_date" type="date"></label>
+ <label>{{ text('participant.club') }}<select name="club_id" data-club-picker></select></label>
+ <label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label>
+ <button>{{ text('runner.save') }}</button><button data-reset="runner-form" type="button">{{ text('common.new') }}</button>
+</form><div id="runner-list"></div>
+<form id="club-form"><h3>{{ text('club.heading') }}</h3>
+ <label>{{ text('club.code') }}<input name="code" maxlength="50"></label>
+ <label>{{ text('common.name') }}<input name="display_name" required maxlength="200"></label>
+ <label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label>
+ <button>{{ text('club.save') }}</button><button data-reset="club-form" type="button">{{ text('common.new') }}</button>
+</form><div id="club-list"></div>
+<form id="master-category-form"><h3>{{ text('category.master') }}</h3>
+ <label>{{ text('category.code') }}<input name="code" required maxlength="30"></label>
+ <label>{{ text('category.name_en') }}<input name="display_name_en" required maxlength="200"></label>
+ <label>{{ text('category.name_de') }}<input name="display_name_de" required maxlength="200"></label>
+ <label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label>
+ <button>{{ text('category.save') }}</button><button data-reset="master-category-form" type="button">{{ text('common.new') }}</button>
+</form><div id="master-categories"></div>
+<button id="load-master-audit" type="button">{{ text('master.history') }}</button><div id="master-audit"></div>
 </section>
 <section id="stations"><h2>{{ text('station.heading') }}</h2>
 <form id="station-form"><label>{{ text('station.number') }}<input name="station_id" type="number" min="0" max="65535" required></label>

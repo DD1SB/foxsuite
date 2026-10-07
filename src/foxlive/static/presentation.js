@@ -29,7 +29,7 @@ globalThis.FoxLiveUI = (() => {
     const p = Object.fromEntries(parts.map(part => [part.type, part.value]));
     return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`;
   }
-  const categoryLabel = category => category ? `${category.code} – ${category.display_name}` : "—";
+  const categoryLabel = (category, lang = "en") => category ? `${category.code} – ${category[lang === "de" ? "display_name_de" : "display_name_en"] || category.display_name || category.display_name_en}` : "—";
   class TagCapture {
     constructor() { this.cancel(); }
     arm(cursor, context) { this.cursor = cursor; this.context = context; this.detected = null; this.waiting = true; }
