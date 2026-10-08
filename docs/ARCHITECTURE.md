@@ -76,6 +76,23 @@ does not even open the output endpoint. Explicit output replay can duplicate an 
 
 ## FoxLive boundaries and lifecycle
 
+The event desk presents three areas: event operations, master-data maintenance and technical System
+views. `workspace.js` manages stable deep links, browser history and visible event context without
+changing domain ownership. `combobox.js` is a dependency-free accessible widget: debounced filtering,
+20 choices, explicit quick-create, no writes on search. Tables render 50 rows at a time. Reusable
+lookups remain bounded/local; bulk participation/usage/history projections avoid per-row queries.
+Duplicate review in `lookup` uses normalized strings and simple similarity, never automatic merging.
+Service quick-create methods use the existing SQLite owner/transactions: new club+runner+entry are
+atomic; explicit category create+enable is a separate atomic commit. No new tables/migrations/scorer.
+
+`views.display_state` whitelists the existing snapshot for presentation, stripping UID/source/raw,
+RSSI, diagnostics, audit and configuration. `/live/display`, `/api/display` and `/ws/display` are
+read-only consumers. They share the accepted result calculation and bounded client Hub with the desk,
+but display WebSocket invalidations have empty payloads; no operator data leaks via those messages.
+The presentation client coalesces refreshes and reconnects independently. A dropped/slow client does
+not affect other clients or ingestion. This boundary is not authorization: M3 remains a trusted-local
+single-operator server, with administration endpoints reachable on the same origin.
+
 Registration separates reusable Runner, Club/DOK and bilingual Category master data from EventEntry
 and EventCategory. UID resolution and scoring use active entries in the selected event, never a
 runner's global identity. Entries snapshot person/club fields and event categories snapshot labels

@@ -109,11 +109,16 @@ only, never competition timestamps, event timezone or protocol data. Native date
 localized captions and safe explicit DST choices; the prefilled IANA timezone is in advanced settings
 (existing/saved/browser timezone, Europe/Berlin on appropriately configured German PCs).
 
-Create reusable categories with code and English/German names under **Reusable data / Stammdaten**.
-Create an event and timing mode, enable its categories, and configure CONTROL/START/FINISH stations.
+Use **Event / Veranstaltung** for overview, participants, categories, stations, live and rankings;
+**Master data / Stammdaten** for reusable-data cleanup/history; **System** for technical diagnostics.
+The selected event name/date remains visible. Create an event and timing mode, enable its categories,
+and configure CONTROL/START/FINISH stations. Existing categories need not be recreated.
 Use **Add participant / Teilnehmer melden**: search an existing runner by name/birth year/club/DOK,
 or create a runner inline with birth year (optional full date), then assign **Start number / Startnummer**,
-category and start time. Category dropdowns show code – localized name. All internal keys are generated.
+category and start time. Searchable keyboard comboboxes show at most 20 choices; club/category creation
+and enabling happen inline, without leaving registration. Duplicate matches are reviewed, not merged.
+New club/person/registration save atomically; explicit category create-and-enable remains saved if
+registration is canceled. Category labels show code – localized name; all internal keys are generated.
 Runner is a reusable person; EventEntry is their registration for one event. UID belongs to EventEntry,
 so the same person or tag may be reused in later events without changing historical assignments.
 Use **Read RFID tag / RFID-Tag einlesen**, punch the tag, review station/time and confirm assignment.
@@ -133,6 +138,9 @@ Browser administration includes CSV preview/atomic import, exports, history, aud
 historical punch selection by tag/station/time (internal references are hidden in normal forms).
 Recalculation never calls the append-only FoxCore raw replay.
 WebSockets signal snapshot refreshes; no browser refresh is needed for new punches or ranking changes.
+Participant/master tables offer search and 50-row pages. **Open live display / Live-Anzeige öffnen**
+opens a separate read-only tab for monitor 2, with large results/punches, EN/DE, fullscreen and automatic
+reconnect. It shares scoring state, but excludes raw RFID, COM/debug and administrative controls.
 M3 assumes one trusted local operator process; non-local binding has no authentication and is unsafe
 on untrusted networks. Back up the DB and TOML before upgrading to migration 4; older binaries reject it.
 Legacy registrations are preserved conservatively as separate runners with unknown birth data;
@@ -149,11 +157,13 @@ mypy
 python -m build
 ```
 
-Tests require no hardware. After the focused M3 operator-UX pass, 190 tests pass on Python 3.12 with
-the optional Chromium checks enabled; Python 3.13 passes 187 with those three optional checks skipped.
+Tests require no hardware. After the focused M3 information-architecture pass, 227 tests pass on
+Python 3.12, including all ten Chromium workflows. Without optional browser execution, 217 pass
+and ten skip. Ruff lint/format and strict mypy pass on 53 Python source/test files.
 Lint, formatting, strict typing, sdist/wheel and clean offline installed-package
 HTTP/WebSocket/simulator smoke pass. All 518
-reference hashes remain unchanged. See [FoxLive validation](docs/FOXLIVE.md) for evidence boundaries.
+reference hashes remain unchanged. One upstream Starlette HTTPX deprecation warning is not suppressed.
+See [FoxLive validation](docs/FOXLIVE.md) for evidence boundaries.
 
 The dependency-free browser helper tests use Node.js if available (no npm/build required).
 For the optional real-browser tests, install `.[dev,ui-test]`, provision Chromium once with

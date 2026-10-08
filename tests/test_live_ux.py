@@ -1,5 +1,6 @@
 """Presentation regressions; source facts/scoring remain owned by accepted M3 services."""
 
+import json
 import re
 import shutil
 import sqlite3
@@ -36,13 +37,19 @@ def test_catalogs_complete_valid_and_same_placeholders() -> None:
     ]:
         assert all(f"{prefix}.{item}" in en for item in enum)
     # Literal keys used by the templates/script must exist, not leak to the desk.
-    source = (ASSETS / "templates" / "desk.html").read_text() + (
-        ASSETS / "static" / "desk.js"
-    ).read_text()
-    for key in re.findall(r'["\']([a-z]+\.[a-zA-Z_]+)["\']', source):
-        if key.startswith("foxlive.") or key in {"desk.css", "desk.js", "presentation.js"}:
+    source = "".join(path.read_text() for path in (ASSETS / "templates").glob("*.html")) + "".join(
+        path.read_text() for path in (ASSETS / "static").glob("*.js")
+    )
+    for key in re.findall(r'["\']([a-z]+\.[a-zA-Z_-]+)["\']', source):
+        if key.startswith("foxlive.") or key.endswith((".css", ".js")):
             continue
         assert key in en, key
+    for code in ("en", "de"):
+        pairs = json.loads(
+            (ASSETS / "static" / "translations" / f"{code}.json").read_text(),
+            object_pairs_hook=list,
+        )
+        assert len(pairs) == len(dict(pairs)), "Duplicate catalog keys"
 
 
 def test_english_default_and_translation_fallback(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -10,6 +10,7 @@ from foxcore.events import Punch
 from foxcore.logging import SafeLogger
 from foxcore.protocol import normalize_uid
 
+from .lookup import club_matches, comparable
 from .models import (
     Category,
     CategoryData,
@@ -160,30 +161,52 @@ class LiveService:
             ),
         )
 
-    def put_club(self, data: ClubData, club_id: int | None = None) -> Club:
+    def _put_club(
+        self, data: ClubData, club_id: int | None = None, allow_similar: bool = True
+    ) -> Club:
         current = next((c for c in self.repo.clubs() if c.id == club_id), None)
         if club_id is not None and current is None:
             raise ValueError("Club does not exist")
         data = data.model_copy(
-            update={"code": data.code.strip(), "display_name": data.display_name.strip()}
+            update={
+                "code": " ".join(data.code.strip().split()),
+                "display_name": " ".join(data.display_name.strip().split()),
+            }
         )
         if not data.display_name:
             raise ValueError("Club name cannot be blank")
+        matches = club_matches(data, [c for c in self.repo.clubs() if c.id != club_id])
+        if matches["exact"]:
+            raise ValueError(
+                "Club code already exists"
+                if data.code
+                and any(comparable(c.code) == comparable(data.code) for c in matches["exact"])
+                else "Club name already exists"
+            )
+        if matches["similar"] and not allow_similar:
+            raise ValueError("Similar clubs exist; review them before creating")
+        values = data.model_dump(mode="json")
+        if club_id is None:
+            club_id = self._insert("live_clubs", values)
+        else:
+            self._update("live_clubs", values, club_id)
+        club = Club(id=club_id, **values)
+        self._master_audit(
+            "club", club_id, current.model_dump() if current else None, club.model_dump()
+        )
+        return club
+
+    def put_club(self, data: ClubData, club_id: int | None = None) -> Club:
         with self.repo.db:
             self.repo.db.execute("BEGIN IMMEDIATE")
-            if data.code and any(
-                c.code == data.code and c.id != club_id for c in self.repo.clubs()
-            ):
-                raise ValueError("Club code already exists")
-            values = data.model_dump(mode="json")
-            if club_id is None:
-                club_id = self._insert("live_clubs", values)
-            else:
-                self._update("live_clubs", values, club_id)
-            club = Club(id=club_id, **values)
-            self._master_audit(
-                "club", club_id, current.model_dump() if current else None, club.model_dump()
-            )
+            club = self._put_club(data, club_id)
+        self.publish("master_data_changed", None, {})
+        return club
+
+    def quick_club(self, data: ClubData, allow_similar: bool = False) -> Club:
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            club = self._put_club(data, allow_similar=allow_similar)
         self.publish("master_data_changed", None, {})
         return club
 
@@ -245,7 +268,7 @@ class LiveService:
         with self.repo.db:
             self.repo.db.execute("BEGIN IMMEDIATE")
             if any(
-                c.code == values["code"] and c.id != category_id
+                comparable(c.code) == comparable(values["code"]) and c.id != category_id
                 for c in self.repo.master_categories()
             ):
                 raise ValueError(f"Category code {values['code']} already exists")
@@ -262,6 +285,41 @@ class LiveService:
                 category.model_dump(),
             )
         self.publish("master_data_changed", None, {})
+        return category
+
+    def quick_category(self, event_id: int, data: CategoryData) -> Category:
+        with self.repo.db:
+            self.repo.db.execute("BEGIN IMMEDIATE")
+            self.mutable(event_id)
+            values = {
+                k: v.strip() if isinstance(v, str) else v for k, v in data.model_dump().items()
+            }
+            if not all(values[k] for k in ("code", "display_name_en", "display_name_de")):
+                raise ValueError("Category code/name cannot be blank")
+            if not data.active:
+                raise ValueError("Category is inactive")
+            if any(
+                comparable(c.code) == comparable(data.code) for c in self.repo.master_categories()
+            ):
+                raise ValueError(f"Category code {data.code} already exists")
+            category_id = self._insert("live_category_master", values | {"needs_review": False})
+            master = MasterCategory.model_validate(values | {"id": category_id})
+            self._master_audit("category", category_id, None, master.model_dump())
+            self.repo.db.execute(
+                "INSERT INTO live_event_categories VALUES (?,?,1,0,?,?,?)",
+                (
+                    event_id,
+                    category_id,
+                    master.code,
+                    master.display_name_en,
+                    master.display_name_de,
+                ),
+            )
+            category = next(c for c in self.repo.categories(event_id) if c.id == category_id)
+            self._audit(event_id, "category", str(category_id), None, category.model_dump())
+            self._calculate(event_id)
+        self.publish("master_data_changed", None, {})
+        self.notify(event_id, "ranking_changed")
         return category
 
     def put_category(
@@ -384,11 +442,21 @@ class LiveService:
         return entry
 
     def register_new_runner(
-        self, event_id: int, runner_data: RunnerData, data: RegistrationData
+        self,
+        event_id: int,
+        runner_data: RunnerData,
+        data: RegistrationData,
+        club_data: ClubData | None = None,
+        allow_similar_club: bool = False,
     ) -> Entry:
         with self.repo.db:
             self.repo.db.execute("BEGIN IMMEDIATE")
             self.mutable(event_id)
+            if club_data is not None:
+                if runner_data.club_id is not None:
+                    raise ValueError("Select an existing club or create a new club, not both")
+                club = self._put_club(club_data, allow_similar=allow_similar_club)
+                runner_data = runner_data.model_copy(update={"club_id": club.id})
             runner = self._put_runner(runner_data)
             entry_data = self.validate_entry(
                 event_id, EntryData(runner_id=runner.id, **data.model_dump())

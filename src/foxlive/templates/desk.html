@@ -1,128 +1,38 @@
 {% macro text(key) %}<span data-i18n="{{ key }}">{{ t(key) }}</span>{% endmacro %}
-{% macro instant(name, key) %}
-<label>{{ text(key) }}<input name="{{ name }}" type="datetime-local" step="1" data-instant>
-  <output data-time-caption></output><select data-time-choice hidden aria-label="{{ t('time.choose_occurrence') }}" data-i18n-aria="time.choose_occurrence"></select>
-</label>
-{% endmacro %}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>FoxLive</title>
-  <link rel="stylesheet" href="/static/desk.css">
-  <script src="/static/presentation.js" defer></script><script src="/static/desk.js" defer></script>
-</head>
-<body>
-<header><div><h1>FoxLive</h1><p>{{ text('app.subtitle') }}</p></div>
-  <label>{{ text('event.label') }}<select id="event-select"><option value="">{{ t('event.none') }}</option>
-    {% for event in snapshot.events %}<option value="{{ event.id }}">{{ event.name }} — {{ t('event.' + event.state) }}</option>{% endfor %}
-  </select></label>
-  <label>{{ text('common.language') }}<select id="language"><option value="en">English</option><option value="de">Deutsch</option></select></label>
-</header>
-<div id="error" role="alert" hidden></div>
-<section class="bar"><span id="event-state">{{ t('common.loading') }}</span><span id="connection"></span>
-  <span id="sync"></span><span id="clock"></span><span id="socket"></span></section>
-<nav>{% for key, target in [('nav.dashboard','dashboard'),('nav.admin','administration'),('nav.participants','participants'),('nav.master','master'),('nav.stations','stations'),('nav.audit','audit')] %}
-  <a href="#{{ target }}">{{ text(key) }}</a>{% endfor %}</nav>
+{% macro instant(name,key) %}<label>{{ text(key) }}<input name="{{ name }}" type="datetime-local" step="1" data-instant><output data-time-caption></output><select data-time-choice hidden aria-label="{{ t('time.choose_occurrence') }}" data-i18n-aria="time.choose_occurrence"></select></label>{% endmacro %}
+{% macro combo(key,label,name='',person='') %}<div class="combo" data-combo="{{ key }}"><label for="{{ key }}-search">{{ text(label) }}</label><input id="{{ key }}-search" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="{{ key }}-suggestions" autocomplete="off"><input type="hidden" {% if name %}name="{{ name }}"{% endif %} {% if person %}data-person="{{ person }}"{% endif %}><div class="suggestions" hidden><div id="{{ key }}-suggestions" role="listbox"></div><button type="button" data-combo-create>{{ text('common.new') }}</button></div></div>{% endmacro %}
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FoxLive</title><link rel="stylesheet" href="/static/desk.css"><script src="/static/presentation.js" defer></script><script src="/static/combobox.js" defer></script><script src="/static/workspace.js" defer></script><script src="/static/desk.js" defer></script></head><body>
+<header><div><h1>FoxLive</h1><p id="event-context">{{ snapshot.event.name if snapshot.event else t('event.begin') }}</p><p id="event-context-date"></p></div><label>{{ text('event.label') }}<select id="event-select">{% for event in snapshot.events %}<option value="{{ event.id }}">{{ event.name }}</option>{% endfor %}</select></label><label>{{ text('common.language') }}<select id="language"><option value="en">English</option><option value="de">Deutsch</option></select></label></header>
+<nav id="top-nav" aria-label="{{ t('nav.areas') }}" data-i18n-aria="nav.areas"><a data-view-link="overview" href="/live">{{ text('event.label') }}</a><a data-view-link="runners" href="/master/runners">{{ text('nav.master') }}</a><a data-view-link="diagnostics" href="/system/diagnostics">{{ text('nav.system') }}</a></nav>
+<nav id="sub-nav" aria-label="{{ t('nav.views') }}" data-i18n-aria="nav.views"></nav>
+<div id="error" role="alert" hidden></div><section class="bar"><span id="event-state"></span><span id="connection"></span><span id="sync"></span><span id="clock"></span><span id="socket"></span></section>
 <main>
-<section id="dashboard"><h2 id="event-title">{% if snapshot.event %}{{ snapshot.event.name }}{% else %}{{ t('event.begin') }}{% endif %}</h2>
-  <p id="event-description"></p><div class="columns"><article><h3>{{ text('punch.recent') }}</h3><div id="recent"></div></article>
-  <article><h3>{{ text('rfid.unknown') }}</h3><p>{{ text('rfid.unknown_help') }}</p><div id="unknown"></div></article></div>
-  <h3>{{ text('ranking.heading') }}</h3><div id="rankings"></div>
-</section>
-<section id="detail" hidden><h2>{{ text('participant.detail') }}</h2><button id="close-detail" type="button">{{ text('common.close') }}</button><div id="detail-body"></div></section>
-<section id="administration"><h2>{{ text('event.admin') }}</h2><p>{{ text('event.admin_help') }}</p>
-<form id="event-form"><h3>{{ text('event.edit') }}</h3>
- <label>{{ text('common.name') }}<input name="name" required maxlength="200"></label>
- <label>{{ text('event.date') }}<input name="date" type="date" required><output data-date-caption></output></label>
- <label>{{ text('event.timing') }}<select name="timing_mode">{% for mode in ['PUNCH_START_FINISH','PREDEFINED_START'] %}<option value="{{ mode }}" data-i18n="timing.{{ mode }}">{{ t('timing.' + mode) }}</option>{% endfor %}</select></label>
- {{ instant('competition_start_at','event.window_start') }}{{ instant('competition_end_at','event.window_end') }}{{ instant('default_start_at','event.default_start') }}
- <label>{{ text('common.description') }}<input name="description" maxlength="2000"></label>
- <details><summary>{{ text('common.advanced') }}</summary><label>{{ text('event.timezone') }}<input name="timezone" required value="UTC" maxlength="100"></label><p>{{ text('event.timezone_help') }}</p></details>
- <button>{{ text('event.save') }}</button><button id="new-event" type="button">{{ text('event.new') }}</button>
-</form>
-<div class="actions"><button data-state="RUNNING">{{ text('event.start') }}</button><button data-state="CLOSED">{{ text('event.close') }}</button>
- <button data-state="ARCHIVED">{{ text('event.archive') }}</button><button id="recalculate">{{ text('event.recalculate') }}</button></div>
-<form id="category-form"><h3>{{ text('category.label') }}</h3>
- <label>{{ text('category.available') }}<select name="category_id" required></select></label>
- <details><summary>{{ text('common.advanced') }}</summary><label>{{ text('common.order') }}<input name="display_order" type="number" value="0"></label>
- <label>{{ text('common.enabled') }}<input name="enabled" type="checkbox" checked></label></details>
- <button>{{ text('category.save') }}</button><button id="new-category" type="button">{{ text('category.new') }}</button>
-</form><div id="categories"></div>
-<form id="import-form"><h3>{{ text('csv.heading') }}</h3><p>{{ text('csv.help') }}</p>
- <label>{{ text('csv.file') }}<input id="csv-file" type="file" accept=".csv,text/csv"></label>
- <label class="wide">{{ text('csv.text') }}<textarea name="text" rows="4" placeholder="start_number,first_name,last_name,category,uid,club,start_time,birth_year,birth_date,club_code"></textarea></label>
- <button name="action" value="preview">{{ text('csv.preview') }}</button><button name="action" value="commit">{{ text('csv.import') }}</button>
-</form><div id="import-summary" role="status"></div>
-<div class="actions"><a id="export-participants" href="#">{{ text('csv.export_participants') }}</a><a id="export-results" href="#">{{ text('csv.export_results') }}</a></div>
-<details><summary>{{ text('debug.heading') }}</summary><p>{{ text('debug.help') }}</p>
- <button id="source-list" type="button">{{ text('debug.sources') }}</button>
- <form id="associate-form"><div id="source-summary" class="wide"></div><button>{{ text('debug.associate') }}</button></form>
-</details>
-</section>
-<section id="participants"><h2>{{ text('participant.heading') }}</h2>
-<form id="participant-form"><h3>{{ text('registration.heading') }}</h3><p class="wide">{{ text('registration.help') }}</p>
- <label>{{ text('runner.search') }}<input id="runner-search" type="search" autocomplete="off"></label>
- <label>{{ text('runner.choose') }}<select name="runner_id" id="runner-choice" required></select></label>
- <button id="create-runner" type="button">{{ text('runner.new') }}</button><button id="select-runner" type="button">{{ text('runner.existing') }}</button>
- <fieldset id="new-runner-fields" class="wide" hidden><legend>{{ text('runner.new') }}</legend>
- <label>{{ text('participant.first_name') }}<input data-person="first_name" maxlength="100"></label>
- <label>{{ text('participant.last_name') }}<input data-person="last_name" maxlength="100"></label>
- <label>{{ text('runner.birth_year') }}<input data-person="birth_year" type="number" min="1" max="9999"></label>
- <label>{{ text('runner.birth_date') }}<input data-person="birth_date" type="date"></label>
- <label>{{ text('participant.club') }}<select data-person="club_id" data-club-picker></select></label>
- </fieldset>
- <label>{{ text('participant.start_number') }}<input name="start_number" type="number" min="1" max="1000000000" required></label>
- <label>{{ text('category.label') }}<select name="category_id" required><option value="">{{ t('category.choose') }}</option></select></label>
- {{ instant('start_time','participant.predefined_start') }}
- <label>{{ text('registration.checked_in') }}<input name="checked_in" type="checkbox"></label>
- <fieldset class="wide"><legend>{{ text('rfid.label') }}</legend>
-   <p id="assigned-tag"></p><button id="read-tag" type="button">{{ text('rfid.read') }}</button>
-   <label>{{ text('rfid.recent') }}<select id="recent-tags"><option value="">{{ t('rfid.choose_tag') }}</option></select></label>
-   <div id="tag-panel" role="status" aria-live="polite" hidden><p id="tag-status"></p>
-     <button id="confirm-tag" type="button" hidden>{{ text('rfid.confirm') }}</button><button id="cancel-tag" type="button">{{ text('common.cancel') }}</button>
-   </div>
-   <details><summary>{{ text('rfid.manual') }}</summary><p>{{ text('rfid.manual_help') }}</p>
-     <label>{{ text('rfid.label') }}<input name="uid" autocomplete="off" spellcheck="false"></label>
-   </details>
- </fieldset>
- <details><summary>{{ text('common.advanced') }}</summary>
- <label>{{ text('participant.override') }}<select name="manual_status"><option value="" data-i18n="participant.automatic">{{ t('participant.automatic') }}</option>{% for status in ['REGISTERED','RUNNING','FINISHED','DNS','DNF','DSQ'] %}<option value="{{ status }}" data-i18n="participant.{{ status }}">{{ t('participant.' + status) }}</option>{% endfor %}</select></label>
- <label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label></details>
- <button>{{ text('participant.save') }}</button><button id="new-participant" type="button">{{ text('participant.new') }}</button>
-</form><div id="participant-list"></div>
-</section>
-<section id="master"><h2>{{ text('master.heading') }}</h2><p>{{ text('master.help') }}</p>
-<form id="runner-form"><h3>{{ text('runner.heading') }}</h3>
- <label>{{ text('participant.first_name') }}<input name="first_name" required maxlength="100"></label>
- <label>{{ text('participant.last_name') }}<input name="last_name" required maxlength="100"></label>
- <label>{{ text('runner.birth_year') }}<input name="birth_year" type="number" min="1" max="9999"></label>
- <label>{{ text('runner.birth_date') }}<input name="birth_date" type="date"></label>
- <label>{{ text('participant.club') }}<select name="club_id" data-club-picker></select></label>
- <label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label>
- <button>{{ text('runner.save') }}</button><button data-reset="runner-form" type="button">{{ text('common.new') }}</button>
-</form><div id="runner-list"></div>
-<form id="club-form"><h3>{{ text('club.heading') }}</h3>
- <label>{{ text('club.code') }}<input name="code" maxlength="50"></label>
- <label>{{ text('common.name') }}<input name="display_name" required maxlength="200"></label>
- <label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label>
- <button>{{ text('club.save') }}</button><button data-reset="club-form" type="button">{{ text('common.new') }}</button>
-</form><div id="club-list"></div>
-<form id="master-category-form"><h3>{{ text('category.master') }}</h3>
- <label>{{ text('category.code') }}<input name="code" required maxlength="30"></label>
- <label>{{ text('category.name_en') }}<input name="display_name_en" required maxlength="200"></label>
- <label>{{ text('category.name_de') }}<input name="display_name_de" required maxlength="200"></label>
- <label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label>
- <button>{{ text('category.save') }}</button><button data-reset="master-category-form" type="button">{{ text('common.new') }}</button>
-</form><div id="master-categories"></div>
-<button id="load-master-audit" type="button">{{ text('master.history') }}</button><div id="master-audit"></div>
-</section>
-<section id="stations"><h2>{{ text('station.heading') }}</h2>
-<form id="station-form"><label>{{ text('station.number') }}<input name="station_id" type="number" min="0" max="65535" required></label>
- <label>{{ text('common.name') }}<input name="display_name" required maxlength="200"></label>
- <label>{{ text('station.role') }}<select name="role">{% for role in ['CONTROL','START','FINISH'] %}<option value="{{ role }}" data-i18n="station.{{ role }}">{{ t('station.' + role) }}</option>{% endfor %}</select></label>
- <label>{{ text('common.order') }}<input name="display_order" type="number" value="0"></label><label>{{ text('common.enabled') }}<input name="enabled" type="checkbox" checked></label><button>{{ text('station.save') }}</button>
-</form><div id="station-list"></div></section>
-<section id="audit"><h2>{{ text('history.heading') }}</h2><button id="load-audit" type="button">{{ text('history.load') }}</button><div id="audit-list"></div></section>
-</main><footer>{{ text('app.footer') }}</footer>
-</body></html>
+<section id="administration" data-view="overview"><h2 id="event-title">{{ snapshot.event.name if snapshot.event else t('event.begin') }}</h2><p id="event-description"></p><p>{{ text('event.workflow_help') }}</p>
+<form id="event-form"><h3>{{ text('event.edit') }}</h3><label>{{ text('common.name') }}<input name="name" required maxlength="200"></label><label>{{ text('event.date') }}<input name="date" type="date" required><output data-date-caption></output></label><label>{{ text('event.timing') }}<select name="timing_mode">{% for mode in ['PUNCH_START_FINISH','PREDEFINED_START'] %}<option value="{{ mode }}" data-i18n="timing.{{ mode }}">{{ t('timing.'+mode) }}</option>{% endfor %}</select></label>{{ instant('default_start_at','event.default_start') }}
+<details class="wide"><summary>{{ text('event.more_settings') }}</summary>{{ instant('competition_start_at','event.window_start') }}{{ instant('competition_end_at','event.window_end') }}<label>{{ text('common.description') }}<input name="description" maxlength="2000"></label><label>{{ text('event.timezone') }}<input name="timezone" required value="UTC" maxlength="100"></label><p>{{ text('event.timezone_help') }}</p></details><button>{{ text('event.save') }}</button><button id="new-event" type="button">{{ text('event.new') }}</button></form>
+<div class="actions"><button data-state="RUNNING">{{ text('event.start') }}</button><button data-state="CLOSED">{{ text('event.close') }}</button><button data-state="ARCHIVED">{{ text('event.archive') }}</button><button id="recalculate">{{ text('event.recalculate') }}</button><a class="button" data-view-link="participants" href="/live">{{ text('nav.participants') }}</a><a id="open-display" class="button" href="/live/display" target="_blank" rel="noopener">{{ text('display.open') }}</a></div></section>
+<section id="participants" data-view="participants" hidden><h2>{{ text('participant.heading') }}</h2><div class="actions"><button id="register-participant">{{ text('registration.heading') }}</button><button id="show-import">{{ text('csv.heading') }}</button><a id="export-participants" href="#">{{ text('csv.export_participants') }}</a></div>
+<div class="filters"><label>{{ text('common.search') }}<input id="participant-search" type="search"></label><label>{{ text('category.label') }}<select id="participant-category-filter"></select></label><label>{{ text('participant.status') }}<select id="participant-status-filter"><option value="" data-i18n="common.all">{{ t('common.all') }}</option>{% for status in ['REGISTERED','RUNNING','FINISHED','DNS','DNF','DSQ'] %}<option value="{{ status }}" data-i18n="participant.{{ status }}">{{ t('participant.'+status) }}</option>{% endfor %}</select></label><label>{{ text('common.sort') }}<select id="participant-sort"><option value="number" data-i18n="participant.start_number">{{ t('participant.start_number') }}</option><option value="name" data-i18n="common.name">{{ t('common.name') }}</option></select></label></div><div id="participant-list"></div><div id="participant-pages" class="actions"></div>
+<div id="import-panel" hidden><form id="import-form"><h3>{{ text('csv.heading') }}</h3><p>{{ text('csv.help') }}</p><label>{{ text('csv.file') }}<input id="csv-file" type="file" accept=".csv,text/csv"></label><label class="wide">{{ text('csv.text') }}<textarea name="text" rows="4"></textarea></label><button name="action" value="preview">{{ text('csv.preview') }}</button><button name="action" value="commit">{{ text('csv.import') }}</button></form><div id="import-summary" role="status"></div></div></section>
+<section id="event-categories" data-view="categories" hidden><h2>{{ text('category.event_heading') }}</h2><p>{{ text('category.selection_help') }}</p><button id="event-create-category">{{ text('category.create') }}</button><div id="categories"></div><details><summary>{{ text('common.order') }}</summary><form id="category-form">{{ combo('event-category','category.available','category_id') }}<label>{{ text('common.order') }}<input name="display_order" type="number" value="0"></label><label>{{ text('common.enabled') }}<input name="enabled" type="checkbox" checked></label><button>{{ text('category.save') }}</button><button id="new-category" type="button">{{ text('common.cancel') }}</button></form></details></section>
+<section id="stations" data-view="stations" hidden><h2>{{ text('station.heading') }}</h2><form id="station-form"><label>{{ text('station.number') }}<input name="station_id" type="number" min="0" max="65535" required></label><label>{{ text('common.name') }}<input name="display_name" required maxlength="200"></label><label>{{ text('station.role') }}<select name="role">{% for role in ['CONTROL','START','FINISH'] %}<option value="{{ role }}" data-i18n="station.{{ role }}">{{ t('station.'+role) }}</option>{% endfor %}</select></label><label>{{ text('common.order') }}<input name="display_order" type="number" value="0"></label><label>{{ text('common.enabled') }}<input name="enabled" type="checkbox" checked></label><button>{{ text('station.save') }}</button></form><div id="station-list"></div></section>
+<section id="dashboard" data-view="live" hidden><h2>{{ text('nav.live') }}</h2><a class="button" data-display-link href="/live/display" target="_blank" rel="noopener">{{ text('display.open') }}</a><div class="columns"><article><h3>{{ text('punch.recent') }}</h3><div id="recent"></div></article><article><h3>{{ text('rfid.unknown') }}</h3><p>{{ text('rfid.unknown_help') }}</p><div id="unknown"></div></article></div><h3>{{ text('station.activity') }}</h3><div id="activity"></div></section>
+<section data-view="rankings" hidden><h2>{{ text('ranking.heading') }}</h2><a id="export-results" href="#">{{ text('csv.export_results') }}</a><div id="rankings"></div></section>
+<section id="master" data-view="runners" hidden><h2>{{ text('runner.heading') }}</h2><p>{{ text('master.help') }}</p><label>{{ text('common.search') }}<input data-directory-search="runners" type="search"></label><div id="runner-list"></div><div id="runners-pages" class="actions"></div><form id="runner-form"><h3>{{ text('runner.new') }}</h3><label>{{ text('participant.first_name') }}<input name="first_name" required maxlength="100"></label><label>{{ text('participant.last_name') }}<input name="last_name" required maxlength="100"></label><label>{{ text('runner.birth_year') }}<input name="birth_year" type="number" min="1" max="9999"></label><label>{{ text('runner.birth_date') }}<input name="birth_date" type="date"></label>{{ combo('master-club','participant.club','club_id') }}<label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label><button>{{ text('runner.save') }}</button><button data-reset="runner-form" type="button">{{ text('common.new') }}</button></form></section>
+<section data-view="clubs" hidden><h2>{{ text('club.heading') }}</h2><label>{{ text('common.search') }}<input data-directory-search="clubs" type="search"></label><div id="club-list"></div><div id="clubs-pages" class="actions"></div><form id="club-form"><label>{{ text('club.code') }}<input name="code" maxlength="50"></label><label>{{ text('common.name') }}<input name="display_name" required maxlength="200"></label><label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label><button>{{ text('club.save') }}</button><button data-reset="club-form" type="button">{{ text('common.new') }}</button></form></section>
+<section data-view="master-categories" hidden><h2>{{ text('category.master') }}</h2><label>{{ text('common.search') }}<input data-directory-search="categories" type="search"></label><div id="master-categories"></div><div id="categories-pages" class="actions"></div><form id="master-category-form"><label>{{ text('category.code') }}<input name="code" required maxlength="30"></label><label>{{ text('category.name_en') }}<input name="display_name_en" required maxlength="200"></label><label>{{ text('category.name_de') }}<input name="display_name_de" required maxlength="200"></label><label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label><button>{{ text('category.save') }}</button><button data-reset="master-category-form" type="button">{{ text('common.new') }}</button></form></section>
+<section data-view="diagnostics" hidden><h2>{{ text('nav.diagnostics') }}</h2><div id="system-status"></div><details><summary>{{ text('debug.heading') }}</summary><p>{{ text('debug.help') }}</p><button id="source-list" type="button">{{ text('debug.sources') }}</button><form id="associate-form"><div id="source-summary" class="wide"></div><button>{{ text('debug.associate') }}</button></form></details><h3>{{ text('history.heading') }}</h3><button id="load-audit">{{ text('history.load') }}</button><div id="audit-list"></div><button id="load-master-audit">{{ text('master.history') }}</button><div id="master-audit"></div></section>
+<section data-view="base" hidden><h2>{{ text('source.label') }}</h2><p>{{ text('system.base_help') }}</p><div id="base-status"></div></section><section data-view="settings" hidden><h2>{{ text('nav.settings') }}</h2><p>{{ text('system.settings_help') }}</p></section>
+</main>
+<dialog id="registration-dialog"><button id="close-registration" type="button">{{ text('common.close') }}</button><form id="participant-form"><h2>{{ text('registration.heading') }}</h2><p class="wide">{{ text('registration.help') }}</p>
+<fieldset class="wide"><legend>{{ text('registration.person_step') }}</legend>{{ combo('runner','runner.choose','runner_id') }}<button id="create-runner" type="button">{{ text('runner.new') }}</button><button id="select-runner" type="button">{{ text('runner.existing') }}</button><fieldset id="new-runner-fields" class="wide" hidden><legend>{{ text('runner.new') }}</legend><label>{{ text('participant.first_name') }}<input data-person="first_name" maxlength="100"></label><label>{{ text('participant.last_name') }}<input data-person="last_name" maxlength="100"></label><label>{{ text('runner.birth_year') }}<input data-person="birth_year" type="number" min="1" max="9999"></label><label>{{ text('runner.birth_date') }}<input data-person="birth_date" type="date"></label>{{ combo('registration-club','participant.club',person='club_id') }}<div id="person-matches" class="wide" hidden></div></fieldset></fieldset>
+<fieldset class="wide"><legend>{{ text('registration.entry_step') }}</legend><label>{{ text('participant.start_number') }}<input name="start_number" type="number" min="1" max="1000000000" required></label>{{ combo('registration-category','category.label','category_id') }}{{ instant('start_time','participant.predefined_start') }}<label>{{ text('registration.checked_in') }}<input name="checked_in" type="checkbox"></label></fieldset>
+<div id="category-enable" class="wide" hidden><p></p><button type="button" id="enable-category">{{ text('category.enable_select') }}</button></div>
+<div id="unknown-entry-panel" class="wide" hidden>{{ combo('unknown-entry','rfid.choose_participant') }}<button type="button" id="use-existing-entry">{{ text('rfid.assign_existing') }}</button></div>
+<fieldset class="wide"><legend>{{ text('rfid.label') }}</legend><p id="assigned-tag"></p><button id="read-tag" type="button">{{ text('rfid.read') }}</button><label>{{ text('rfid.recent') }}<select id="recent-tags"></select></label><div id="tag-panel" role="status" aria-live="polite" hidden><p id="tag-status"></p><button id="confirm-tag" type="button" hidden>{{ text('rfid.confirm') }}</button><button id="cancel-tag" type="button">{{ text('common.cancel') }}</button></div><details><summary>{{ text('rfid.manual') }}</summary><p>{{ text('rfid.manual_help') }}</p><label>{{ text('rfid.label') }}<input name="uid" autocomplete="off" spellcheck="false"></label></details></fieldset>
+<details class="wide"><summary>{{ text('common.advanced') }}</summary><label>{{ text('participant.override') }}<select name="manual_status"><option value="" data-i18n="participant.automatic">{{ t('participant.automatic') }}</option>{% for status in ['REGISTERED','RUNNING','FINISHED','DNS','DNF','DSQ'] %}<option value="{{ status }}" data-i18n="participant.{{ status }}">{{ t('participant.'+status) }}</option>{% endfor %}</select></label><label>{{ text('common.active') }}<input name="active" type="checkbox" checked></label></details><button id="save-registration">{{ text('participant.save') }}</button><button id="new-participant" type="button">{{ text('participant.new') }}</button><div id="registration-error" role="alert" class="wide" hidden></div></form></dialog>
+<dialog id="detail"><h2>{{ text('participant.detail') }}</h2><button id="close-detail" type="button">{{ text('common.close') }}</button><div id="detail-body"></div></dialog>
+<dialog id="master-detail"><button id="close-master-detail" type="button">{{ text('common.close') }}</button><div id="master-detail-body"></div></dialog>
+<dialog id="category-dialog"><fieldset id="quick-category" class="wide"><legend>{{ text('category.create') }}</legend><label>{{ text('category.code') }}<input data-category="code" maxlength="30"></label><label>{{ text('category.name_en') }}<input data-category="display_name_en" maxlength="200"></label><label>{{ text('category.name_de') }}<input data-category="display_name_de" maxlength="200"></label><button type="button" id="create-enable-category">{{ text('category.create_enable') }}</button><button type="button" data-close-dialog="category-dialog">{{ text('common.cancel') }}</button><p>{{ text('category.commit_help') }}</p><div class="dialog-error" role="alert" hidden></div></fieldset></dialog>
+<dialog id="club-dialog"><fieldset id="quick-club" class="wide"><legend>{{ text('club.quick_heading') }}</legend><label>{{ text('club.code') }}<input data-club="code" maxlength="50"></label><label>{{ text('common.name') }}<input data-club="display_name" maxlength="200"></label><button type="button" id="create-select-club">{{ text('club.create_select') }}</button><button type="button" data-close-dialog="club-dialog">{{ text('common.cancel') }}</button><div id="club-matches" class="wide" hidden></div><p>{{ text('club.staging_help') }}</p><div class="dialog-error" role="alert" hidden></div></fieldset></dialog>
+<footer>{{ text('app.footer') }}</footer></body></html>

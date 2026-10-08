@@ -1,5 +1,31 @@
 # Changelog
 
+## M3 maintenance — event-desk information architecture
+
+Separates Event operations (overview/participants/categories/stations/live/rankings), Master data
+(runners/clubs/categories) and System (base/diagnostics/settings), with persistent event context and
+meaningful deep links/back-forward navigation. Registration stays in one event-local dialog with
+bounded, debounced, keyboard/mouse-accessible runner/club/category comboboxes and inline creation.
+Enabled event categories are prioritized; existing global categories can be enabled/selectable
+without duplicates. Category quick-create explicitly saves bilingual master data and event selection.
+New club/runner/registration commit atomically; canceling a staged registration leaves no debris.
+Exact normalized club duplicates are rejected; near clubs/people require review, never automatic merge.
+Read/confirm RFID and unknown-tag reassociation retain the existing audited reinterpretation path.
+
+Participant/master tables have search, 50-row pages, event filters/sorting, usage/participation counts
+and historical snapshots. Operator Live retains useful punch/tag/station detail; technical source
+data is under System. A separate `/live/display` window uses a restricted read-only HTTP/WebSocket
+projection of the same results: no raw RFID/COM/audit/debug/admin data, large responsive presentation,
+EN/DE, fullscreen, multiple clients and automatic reconnect. No new scorer, domain/schema migration,
+runtime dependency, frontend build or FoxCore/FoxBridge behavior change.
+
+Validation: 227 tests pass, including ten Chromium workflows (20 new cases plus updated accepted UI
+checks). Synthetic coverage includes 500 runners, 200 clubs, 50 categories, 500 entries and 3,000
+punches, with bounded rendering and bulk-query projections. Ruff lint/format, strict mypy (53 files),
+sdist/wheel, offline installation and installed HTTP/WebSocket/simulator/restart/shutdown smoke pass.
+All 518 firmware hashes remain unchanged. Physical Windows FoxLive acceptance/long-running field
+operation remain pending; no later milestone started. One upstream Starlette warning remains visible.
+
 ## M3 maintenance — reusable master data and event registrations
 
 Additive migration 4 separates Runner (person/birth information/Club-DOK) and global bilingual

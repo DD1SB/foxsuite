@@ -28,8 +28,9 @@ from foxcore.serial import SerialTransport
 from foxcore.service import IngestService
 from foxcore.timesync import TimeSyncService
 
-from . import csvio, presentation
+from . import csvio, presentation, views
 from .config import LiveConfig
+from .lookup import club_matches, runner_matches
 from .models import (
     Category,
     CategoryData,
@@ -81,6 +82,13 @@ class LocalTimeInput(Model):
 class NewRegistrationInput(Model):
     runner: RunnerData
     entry: RegistrationData
+    club: ClubData | None = None
+    allow_similar_club: bool = False
+
+
+class QuickClubInput(Model):
+    club: ClubData
+    allow_similar: bool = False
 
 
 class Hub:
@@ -320,12 +328,48 @@ def create_app(
         )
 
     @app.get("/", response_class=HTMLResponse)
-    async def dashboard() -> HTMLResponse:
+    @app.get("/live", response_class=HTMLResponse)
+    @app.get("/events/{event_id}/{section}", response_class=HTMLResponse)
+    @app.get("/master/{section}", response_class=HTMLResponse)
+    @app.get("/system/{section}", response_class=HTMLResponse)
+    async def dashboard(event_id: int | None = None, section: str = "overview") -> HTMLResponse:
         return HTMLResponse(
             templates.get_template("desk.html").render(
-                snapshot=snapshot(), t=presentation.translate
+                snapshot=snapshot(event_id), t=presentation.translate
             )
         )
+
+    @app.get("/live/display", response_class=HTMLResponse)
+    async def live_display() -> HTMLResponse:
+        return HTMLResponse(templates.get_template("display.html").render(t=presentation.translate))
+
+    @app.get("/api/display")
+    async def display(event_id: int | None = None) -> dict[str, Any]:
+        return views.display_state(current().live, event_id)
+
+    @app.get("/api/ui/master-summary")
+    async def master_summary() -> dict[str, Any]:
+        return views.master_summary(current().live)
+
+    @app.get("/api/runners/{runner_id}/history")
+    async def runner_history(runner_id: int) -> list[dict[str, Any]]:
+        return views.runner_history(current().live, runner_id)
+
+    @app.post("/api/ui/club-matches")
+    async def similar_clubs(data: ClubData) -> dict[str, list[Club]]:
+        return club_matches(data, current().live.repo.clubs())
+
+    @app.post("/api/ui/quick-club", response_model=Club)
+    async def quick_club(data: QuickClubInput) -> Club:
+        return current().live.quick_club(data.club, data.allow_similar)
+
+    @app.post("/api/ui/runner-matches")
+    async def similar_runners(data: RunnerData) -> list[Runner]:
+        return runner_matches(data, current().live.repo.runners())
+
+    @app.post("/api/events/{event_id}/quick-category", response_model=Category)
+    async def quick_category(event_id: int, data: CategoryData) -> Category:
+        return current().live.quick_category(event_id, data)
 
     @app.post("/api/ui/local-time")
     async def local_time(data: LocalTimeInput) -> dict[str, Any]:
@@ -429,7 +473,9 @@ def create_app(
 
     @app.post("/api/events/{event_id}/register-new-runner", response_model=Entry)
     async def register_runner(event_id: int, data: NewRegistrationInput) -> Entry:
-        return current().live.register_new_runner(event_id, data.runner, data.entry)
+        return current().live.register_new_runner(
+            event_id, data.runner, data.entry, data.club, data.allow_similar_club
+        )
 
     @app.put("/api/events/{event_id}/participants/{participant_id}", response_model=Entry)
     async def edit_entry(event_id: int, participant_id: int, data: EntryData) -> Entry:
@@ -520,10 +566,23 @@ def create_app(
 
     @app.websocket("/ws")
     async def websocket(socket: WebSocket) -> None:
+        await serve_socket(socket, False, None)
+
+    @app.websocket("/ws/display")
+    async def display_socket(socket: WebSocket, event_id: int | None = None) -> None:
+        await serve_socket(socket, True, event_id)
+
+    async def serve_socket(socket: WebSocket, public: bool, event_id: int | None) -> None:
         origin = socket.headers.get("origin")
         if origin and urlparse(origin).netloc != socket.headers.get("host"):
             await socket.close(code=1008)
             return
+        if public and event_id is not None:
+            try:
+                current().live.repo.event(event_id)
+            except ValueError:
+                await socket.close(code=1008)
+                return
         await socket.accept()
         runtime = current()
         queue = runtime.hub.subscribe()
@@ -531,10 +590,26 @@ def create_app(
         async def send() -> None:
             async with asyncio.timeout(5):
                 await socket.send_json(
-                    {"type": "snapshot", "version": 1, "event_id": None, "payload": snapshot()}
+                    {
+                        "type": "snapshot",
+                        "version": 1,
+                        "event_id": event_id,
+                        "payload": views.display_state(runtime.live, event_id)
+                        if public
+                        else snapshot(),
+                    }
                 )
             while True:
                 message = await queue.get()
+                if public:
+                    if event_id is not None and message["event_id"] not in {None, event_id}:
+                        continue
+                    message = {
+                        "type": message["type"],
+                        "version": 1,
+                        "event_id": event_id,
+                        "payload": {},
+                    }
                 async with asyncio.timeout(5):
                     await socket.send_json(message)
 

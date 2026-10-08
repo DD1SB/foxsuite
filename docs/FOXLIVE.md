@@ -1,5 +1,105 @@
 # FoxLive — M3 domain and operational contract
 
+## Event desk information architecture
+
+Event operations (overview, participants, category selection, stations, operator live and rankings)
+are separate from reusable-data maintenance and System diagnostics/settings. Deep links retain event
+context; navigation does not clear an unsaved registration. Register participant opens one local
+dialog: bounded searchable runner/category/club suggestions, inline person creation, explicit club
+and category creation, event fields, read/confirm RFID and save. No generated reference is entered.
+Club+new runner+entry commit atomically; canceling staged club/person creation writes nothing.
+Category creation/enabling is an explicit independent commit, retained if registration is canceled.
+Similar people/clubs produce review choices, not automatic merges. Exact normalized club matches
+are rejected. Category quick-create enables/selects the reusable category for the current event.
+
+`/live/display` is a separate read-only second-monitor window. Its HTTP/WebSocket projection excludes
+RFID values, raw source records, COM ports, diagnostics, audit and administration. It displays the
+same persisted competition results, not another scoring implementation. EN/DE language and native
+time inputs remain presentation concerns. Physical Windows acceptance is still pending.
+
+### Registration and navigation
+
+The header always shows the opened event name/date. Event selection is remembered locally in the
+browser, distinct from the single RUNNING competition. Event tabs have deep links under
+`/events/{event}/overview`, `participants`, `categories`, `stations`, `live`, and `rankings`.
+Master data has `/master/runners`, `/master/clubs`, `/master/categories`; technical information has
+`/system/base`, `/system/diagnostics`, `/system/settings`. Internal keys are only URL/API references
+or hidden selections, never editable identity fields or navigation labels. Back/forward navigation
+between views keeps unsaved form values; deliberately opening another event clears the registration
+and cancels tag reading to prevent cross-event assignment. Closing a registration cancels/stops tag
+capture. A new registration explicitly clears the old draft.
+
+On **Participants**, use **Register participant / Teilnehmer melden**. Search by name, year or
+club/DOK; suggestions include all three to disambiguate people. Select an existing runner or create
+one in the same dialog. Club selection searches code/name; an unmatched query offers explicit quick
+creation. Review existing exact/near matches, then select an existing club or confirm a distinct new
+club. Code-only or name-only quick creation is permitted (code-only uses that code as the name).
+Normal comparison trims/compacts whitespace and case-folds code/name. Exact normalized club code OR
+name duplicates are rejected; simple string/meaningful-word similarity only warns, never merges.
+Inline person creation similarly offers plausible existing people before saving; equal names may
+legitimately represent different people, so explicit new-person confirmation is possible.
+
+Category suggestions prioritize categories enabled for this event. A global category not enabled
+offers **Enable and select**. Quick-create asks for code plus English and German names, then
+atomically creates/enables/selects it; duplicate normalized codes are rejected. This is an explicit
+independent commit (the dialog explains that canceling registration will not delete this category).
+No write occurs merely from typing/searching. A new club is staged in new-runner registration and
+commits with runner, entry and audit, or all roll back on a collision. Club quick creation in master
+runner administration is an explicit independent commit, not a staged registration transaction.
+
+Finish event fields (start number, category, optional native start time, check-in), read/confirm the
+RFID tag or choose a recent unassigned tag, and save. Unknown tags in Operator Live offer **Assign
+tag / register participant**, including selection of an existing registration. RFID remains on
+EventEntry; assignment uses the existing audited recalculation and never creates/edits source facts.
+To change another active owner's tag, first deliberately clear that registration's assignment.
+
+Suggestions are debounced 120 ms and limited to 20 rendered choices; Arrow Up/Down and Enter select,
+Escape dismisses, and Tab reaches the explicit create button. Typed text alone is not a selection.
+Participants support name/year/club/start-number search, category/status filters, sorting and 50-row
+pages. Master directories also have search/50-row pages, participation/usage counts, runner historical
+registration snapshots and club-associated runner lookup. Master runners are fetched through the
+existing bounded API (up to 10,000), not expanded into an enormous HTML dropdown. This is a local
+single-operator desk, not an unbounded remote directory.
+
+### Operator Live and presentation display
+
+**Event → Live** shows participant/station/time/interpretation/RSSI, unknown-tag resolution and station
+activity. COM ports, source JSON, source IDs, parser/database health and audit technical details are
+under System, not the public display. Operational source connection/TimeSync status remains in the
+desk's compact status bar; a failed TimeSync write is not a field-station acknowledgement.
+
+**Open live display / Live-Anzeige öffnen** opens `/live/display?event_id=…` in a separate tab/window
+without disturbing the desk. Move it to monitor 2 and optionally use **Fullscreen / Vollbild**.
+The browser must allow fullscreen; its exit key remains available. The view is responsive at desktop
+1080p and stacks on narrower tablets. It shows localized event name/date/state, recent punches,
+finished category ranks and separately provisional state, running count and stations with recorded
+activity. "Active station" here means an enabled station with an associated punch, not mesh health.
+No registration, correction, source/debug/COM or configuration controls exist. Unknown people appear
+without raw RFID values. Many categories/results may require scrolling; no automatic slideshow is
+introduced. The display follows its window's selected language; changing another window does not
+force an immediate switch. Local-storage preference remains shared by the browser origin for reloads.
+
+`GET /api/display` and read-only `/ws/display` accept optional `event_id`. They whitelist display data:
+event identity/labels, category labels, entry display names/start numbers, existing scoring results,
+12 recent punch display rows and counts. IDs remain hidden internal references. The WebSocket starts
+with this projection, then sends version-1 invalidations with empty payloads (never the operator
+channel's UID/diagnostic content). The client coalesces HTTP refreshes, automatically reconnects
+after two seconds and refreshes the current snapshot, not historical punch notifications. Both views
+share the accepted result service and bounded isolated client queues; no duplicate scorer exists.
+This is presentation separation, **not authentication**: all administration APIs still exist on the
+same trusted-local-PC server. Do not expose it to untrusted spectators/networks.
+
+### Conceptual views
+
+| View | Operator sees | Main action |
+| --- | --- | --- |
+| Event Participants | Event name/date; search/category/status filters; start number, runner/year/DOK, category, tag, status | Register participant, import CSV, edit/tag/details/deactivate |
+| Registration dialog | Find/create runner; inline club; event category/create-enable; start number/time; read/recent tag | Confirm tag and save without leaving the event |
+| Event Categories | Localized reusable category labels with enabled checkboxes | Select existing or explicitly create/enable category |
+| Master data | Searchable reusable people/clubs/categories, participation/usage counts, historical snapshots | Correct or deactivate reusable data, never automatic merge |
+| Operator Live | Recent punches, interpretations/RSSI, unknown tags, station activity | Resolve tags or perform reasoned exclusion |
+| Presentation display | Large event header, recent participant/control visits, finished/provisional category results | Language/fullscreen only; no administration |
+
 FoxLive is a standalone local competition desk consuming immutable FoxCore punches. It does not use
 FoxBridge, Fjw, SPORTident numbers or another serial reader/parser. M1/M2 remain accepted siblings.
 The domain contract was committed before implementation; the final section records actual validation.
@@ -333,18 +433,23 @@ Use a backed-up/separate DB and stop competing serial readers. Set the real base
 default TimeSync; `[live]` localhost. Record app/Python/Windows/browser and firmware versions.
 Path: real RFID → FoxIdent → LoRa → FoxIdentServer USB → FoxCore → FoxLive. No Fjw/virtual COM.
 
-1. Start `foxsuite --config config/foxsuite.toml live run`; create the smoke-test event, Europe/Berlin.
+1. Start `foxsuite --config config/foxsuite.toml live run`; create/open the smoke-test event under
+   Event → Overview, Europe/Berlin. Verify its name/date stays in the header across tabs.
 2. Choose PREDEFINED_START with default local start a minute before current synchronized time.
-   Create reusable category OPEN with both language names and enable it for this event (using this
+   Select OPEN under Event → Categories or create it inline with both language names (using this
    mode permits control-only hardware to exercise the desk).
-3. Use Add participant: select/create a reusable runner with birth year/optional full date and
-   club/DOK, register start number 17 in OPEN. Confirm no person master form owns an RFID tag.
+3. Under Event → Participants, register a known runner using keyboard name/year/DOK search. Then
+   register a new runner inline, select an existing club and try explicit new-club creation in the
+   same workflow. Review exact/near matches. Select/enable/create category without leaving the dialog.
+   Set start number 17 in OPEN; no person master form owns an RFID tag. Cancel a staged registration
+   once and verify no orphan club/person was saved. Explicit category creation remains saved.
 4. Use Read RFID tag, punch the real tag, review station/time, and confirm/save the assignment.
    The accepted M2 tag `046365525C6180` is only an example, not a default.
 5. Configure the actual Fox station as CONTROL with a visible name; IDs are not defaults.
 6. Set RUNNING and verify source CONNECTED, recent TimeSync write and firmware time confirmation.
 7. Punch the real tag once at the field station.
-8. Verify a row appears without browser reload and note its source/raw IDs.
+8. Open Event → Live; verify a row appears without browser reload. Source/raw IDs are available in
+   System → Diagnostics only; note them for the test record.
 9. Verify #17/name/OPEN are correct.
 10. Verify Fox ID/name, local event time, callsign/RSSI and VALID_CONTROL.
 11. Verify distinct controls becomes 1 and state RUNNING; missing finish remains unranked.
@@ -354,8 +459,13 @@ Path: real RFID → FoxIdent → LoRa → FoxIdentServer USB → FoxCore → Fox
 14. Punch an unregistered second UID and verify prominent UNKNOWN with station/time.
 15. Assign that UID to an existing unassigned participant; history reinterprets, provisional state
     updates and raw/source row counts do not increase. Record audit before/after.
+    Also exercise unknown-tag registration of an existing/new runner.
+    Open **Live-Anzeige öffnen / Open live display** in a second browser window, move to monitor 2,
+    optionally enter fullscreen, and verify a subsequent real punch updates both views. Check EN/DE,
+    participant/ranking correctness and absence of RFID/COM/admin/debug data in the presentation view.
 16. Note snapshots/results/IDs; Ctrl+C and restart using the same config/DB.
 17. Verify event/registration/stations/audit/history remain intact, with no historical punch alerts.
+    Reopen/reconnect the display and check its same current state/results without manual refresh.
 18. Force recalculation twice; compare identical counts/results and export participant/results CSV.
 
 Extended timing acceptance, when START/FINISH hardware is available: repeat in PUNCH_START_FINISH
@@ -414,6 +524,28 @@ host/port/paths and concise operator errors. Core changes are limited to suite v
 and additive migration 3; accepted serial/parser/TimeSync/dedupe logic is untouched. The prior fixed
 schema-version assertion now checks the migration count without dropping its source-preservation test.
 M4 has not been started.
+
+## M3 event-desk UX / information architecture gates — 2026-10-08
+
+| Gate | Result and boundary |
+| --- | --- |
+| Complete Python 3.12 pytest | **227 passed**, including all retained M1/M2/M3 checks and ten Chromium workflows; 20 new IA/quick-create/display cases |
+| Chromium | Existing EN/DE/DST/RFID/history checks adapted to intentional navigation/combobox changes, not weakened; inline club/category/person review, cancel/atomic save, known runner selection, keyboard/mouse, event deep links/history and realistic tables pass |
+| Display / WebSockets | Two concurrent real browser windows update punches/results without reload, reconnect, and render EN/DE; read-only HTTP/WS whitelist is tested against UID/raw/source/COM/audit leaks |
+| Realistic data | 500 runners, 200 clubs, 50 categories, 500 EventEntries, 3,000 source punches; 20 suggestions/50-row pages and bulk snapshot queries (no per-entry N+1) verified; not a long-duration field benchmark |
+| Visual review | Automated isolated screenshots of participants, grouped registration, master data and presentation reviewed; no brittle pixel snapshots or hardware claim |
+| Ruff / strict mypy | Lint, format and strict types pass, 53 Python source/test files; original gates/settings unchanged |
+| Build / installed wheel | Sdist/wheel, clean offline local-wheelhouse installation, CLI/local assets and operator/display HTTP/WS smoke, simulator/raw-first intake, restart/recalculation/CSV and graceful shutdown pass |
+| Accepted boundaries | Schema remains 4; original migrations, source model/persistence, scoring, FoxCore and FoxBridge unchanged; all 518 reference hashes match |
+| Hardware/manual acceptance | **Pending**; follow the updated setup/inline registration/live/second-monitor/recovery checklist above on Windows with physical Fox hardware |
+
+The upstream Starlette HTTPX deprecation warning remains visible. Main remaining risks are physical
+Windows/fullscreen/browser behavior and long-running operation, local-only/no authentication, briefly
+blocking large recalculation/import, absence of a field-station synchronization acknowledgement and
+intentional source association/exclusions requiring careful operators. Category quick-create is an
+explicit independent commit; canceled registration does not remove it. Similarity review is a simple
+warning, not identity proof or automatic merging. Presentation privacy is not access control.
+No schema/domain/scoring redesign or later milestone work is included.
 
 ## Focused M3 operator-UX validation — 2026-10-07
 

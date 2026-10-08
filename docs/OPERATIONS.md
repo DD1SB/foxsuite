@@ -205,6 +205,29 @@ Full competition workflows remain untested: see [Fjw integration](FJW_INTEGRATIO
 
 ## FoxLive startup and administration
 
+The desk has three top-level areas: **Event / Veranstaltung**, **Master data / Stammdaten**, and
+**System**. Open an event once; its name/date remains in the header. Event tabs contain overview,
+participants, enabled categories, stations, operator live and rankings. Master-data pages are for
+cleanup/history, not prerequisites to check-in; System holds COM/source/debug and detailed health.
+
+**Participants → Register participant / Teilnehmer melden** is a single event-local dialog. Search
+runner name/year/DOK (20 keyboard-operable suggestions), select an existing person or create one
+inline, select/create a club, select/enable/create a category, set start number/time and read/confirm
+the tag. No master-data navigation round-trip is necessary. Near club/person matches ask for review;
+exact normalized club duplicates are rejected, never merged. Club+new runner+registration commit
+together; canceling that staged workflow leaves no new club/person. Category create-and-enable is
+an explicit separate save and remains after cancellation. The dialog explains this distinction.
+Participant tables have search/category/status/sort and 50-row pages; master tables have search,
+counts/history and 50-row pages. Back/forward keeps forms within the opened event. Opening another
+event intentionally cancels/reset registration to prevent assigning a tag across events.
+
+Use Event → Live for operator details and unknown-tag resolution. **Open live display /
+Live-Anzeige öffnen** opens a read-only window; move it to a second monitor and choose Fullscreen.
+It shows participant visits and the same finished/provisional results, never RFID/COM/debug/admin
+controls. Multiple windows update/reconnect independently without refresh. Each window can select
+EN/DE; the origin's saved preference applies on reload. Without authentication this is not a secured
+public endpoint: keep localhost or a trusted isolated network, never port-forward the server.
+
 Back up the DB/config before opening 0.3.0: additive schema 3 cannot be opened by older M1/M2 binaries.
 Stop other `run`/`bridge run`/`live run` processes before opening the physical base; one writer/owner
 process is supported. FoxLive requires neither FjwW nor a virtual COM pair. Keep `[serial]`, DB and
@@ -318,7 +341,8 @@ raw facts, associations or audit and are not a complete backup.
 
 ## FoxLive Windows hardware smoke test — not yet performed
 
-Follow the exact 18-step checklist in the hardware/manual smoke section of [FOXLIVE](FOXLIVE.md).
+Follow the extended setup/registration/live/second-monitor/restart checklist in the hardware/manual
+smoke section of [FOXLIVE](FOXLIVE.md).
 Use real RFID → FoxIdent → LoRa → base USB → FoxCore → FoxLive (no FoxBridge/Fjw/VSPE required).
 Record Python/app/firmware/Windows/browser versions, COM port, event timezone and test source IDs.
 M1 hardware and M2 SI-C acceptance remain valid evidence for those layers, not FoxLive validation.
