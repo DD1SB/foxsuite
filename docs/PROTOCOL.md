@@ -22,6 +22,13 @@ Paths below are relative to `reference/`. This is source-code verification, not 
 
 The supplementary document's incomplete base path warning applies to field `LoRaManager`, not the separate current FoxIdentServer implementation, which handles TimeRequest and Sync generation. The server still prints the legacy name `FoxBase 1.0.0`; this is current source output, not evidence of a legacy protocol. `TagFileData` declares two uint32s while `RFIDManager::writeTimestampFile` writes timestamp32, eventId16, reserved byte, sync flag; FoxCore does not decode tag memory. Unescaped callsigns can produce malformed JSON; raw bytes are retained rather than firmware modified.
 
+M5 source inspection additionally found that `RFIDManager::selectApplication`
+comments name AID `0x56789A` LSB-first, but transmit bytes `56 78 9A` (a different
+numeric value under little-endian notation). Deployed tag selection remains a
+physical reader validation requirement. [TAG_READOUT](TAG_READOUT.md) documents
+the actual writer layout, discrepancy and separate version-1 acquisition contract;
+that contract is not current FoxIdentServer serial output.
+
 ## Assumptions still requiring hardware validation
 
 USB driver settings, reset/DTR behavior, effective 8N1, sustained throughput, radio interoperability across struct ABIs, actual PC-to-base-to-station sync latency, post-2038 conversion, reconnect reliability, timestamp validity and collisions after station reboot remain unverified. Automated fixtures are derived from source. See OPERATIONS for hardware checklist.

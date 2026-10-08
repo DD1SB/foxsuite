@@ -1,4 +1,4 @@
-# FoxSuite architecture — M1 through M4
+# FoxSuite architecture — M1 through M5
 
 ## M4 desktop operations boundary
 
@@ -168,7 +168,7 @@ Large operator-triggered recalculation/import is synchronous and may briefly pau
 this is deliberately a small single-operator event desk, not a multi-user/distributed service.
 See [FOXLIVE](FOXLIVE.md) for timing, tie, correction and restart contracts. Full SPORTident readout,
 station programming, complete Fjw replacement and all later milestones remain out of scope.
-# M5 evidence boundary
+## M5 evidence boundary
 
 Offline readout acquisition is separate from interpretation: a small provider
 returns an immutable snapshot; raw snapshot persistence precedes reconciliation.
@@ -179,3 +179,35 @@ See [TAG_READOUT.md](TAG_READOUT.md) and [RECONCILIATION.md](RECONCILIATION.md).
 SQLite writes remain serialized on the existing application owner loop. Snapshot
 facts commit before derived processing; a downstream failure is recoverable by
 recalculation. Slow WebSocket clients continue using the existing bounded hub.
+
+```mermaid
+flowchart LR
+    Core[Immutable FoxCore punches] --> Live[LIVE references]
+    Provider[File / simulator / future reader] --> Raw[Immutable readout snapshots]
+    Raw --> Tag[TAG_READOUT records]
+    Jury[Reasoned operator action] --> Manual[Append-only MANUAL decisions]
+    Live --> Resolve[Reconcile per entry and station]
+    Tag --> Resolve
+    Manual --> Resolve
+    Resolve --> Review[Review cases / provenance]
+    Resolve --> Score[Existing timing and ranking strategy]
+    Score --> Clients[Operator desk / read-only display]
+```
+
+`readout.py` defines the bounded versioned contract, parser and provider protocol;
+`reconciliation.py` contains pure evidence rules and transient scoring observations;
+`evidence.py` owns persistence, review and reasoned adjudication on the existing
+SQLite owner loop. `service.py` coordinates the resolved input with the unchanged
+sporting rules. APIs/CLI/assets call those services, not alternate scoring code.
+Transient offline observations never masquerade as FoxCore source records.
+Migration 5 is additive; snapshots/decisions are historical facts, resolution and
+review payloads are rebuildable caches. Intake is incremental per UID, while
+configuration changes/full recalculation are deterministic event-wide operations.
+
+The UI adds Readout / Finish and Review cases within the selected event, without
+new master-data or registration ownership. Unknown readouts reuse existing entry
+assignment/registration. WebSocket invalidations add tag_readout_completed,
+reconciliation_updated, review_case_created and review_case_resolved, then the
+existing authoritative snapshot refresh. Public projections reveal only result
+completeness, not raw evidence/reviewer details. No physical reader integration,
+firmware change, other chip adapter or visual-polish milestone is included.

@@ -1,4 +1,4 @@
-# FoxLive — M3 domain and operational contract
+# FoxLive — competition desk and M5 evidence workflow
 
 M4 desktop setup/settings surround this accepted application without changing its domain/scoring.
 Normal Windows launch uses the Start-menu FoxSuite shortcut; first-run setup selects language,
@@ -628,3 +628,138 @@ categories; collision/reassignment/tie/import fixtures now use distinct people a
 Their timing, ranking, immutable-source and error-boundary assertions remain intact. Historical
 validation sections above describe earlier commits, not the current schema/registration contract.
 At this domain-model snapshot, M4 had not been started. Current M4 operations are documented in WINDOWS.md.
+
+## M5 readout / finish and review desk
+
+Within an opened event, **Readout / Finish / Auslesen / Ziel** and **Review cases /
+Prüffälle** sit beside the accepted registration/live/ranking views. These use the
+same Runner/EventEntry/station/timing domain. Scoring remains distinct controls
+descending, then elapsed whole seconds ascending, including unchanged sporting
+ties. Only its input is now a resolved LIVE/TAG_READOUT/MANUAL evidence view.
+
+Set **Embedded tag event number** under advanced event settings to match the
+field-station firmware (unsigned 16-bit). This is not an internal event ID.
+Existing events have no assumed number; unknown/wrong tag event IDs require
+review. Do not use the firmware's development number for unrelated events.
+
+M5 currently provides capture-file and simulator acquisition, **not a connected
+physical reader**. The finish desk states this explicitly. Import a captured
+snapshot without editing JSON, or use the developer simulator: select an entry,
+stations and native local time inputs, plus scenario. The simulator can produce
+empty/valid/wrong-event/unsynchronized/malformed/partial/failed/aborted captures.
+Future reader firmware must implement [the versioned contract](TAG_READOUT.md).
+
+A readout shows participant/category, completion, successful/failed records,
+live/tag controls, recovered controls, matches and open reviews. These summary
+counts reflect the current reconciliation, including later assignments/decisions.
+An unknown tag offers assignment to an existing registration or the same inline
+existing/new-runner registration used in M3. Confirm ownership before saving;
+historical readout/live facts are reinterpreted, never rewritten or duplicated.
+An old event's tag can be reused; a different active entry in this event cannot
+silently lose its tag. Malformed captures without a usable UID remain diagnostic.
+
+Ordinary live-only, exact matches, legitimate live revisits and synchronized
+correct-event tag-only recovery need no jury action. Tags store one overwritable
+file per station, not a full visit history. A missing tag file does not invalidate
+live evidence. Full conservative rules are in [RECONCILIATION](RECONCILIATION.md).
+Conflicting controls retain live scoring provisionally; conflicting START/FINISH
+times are withheld until adjudicated. Unsynchronized/invalid/event-mismatched or
+out-of-window data stays visible, not automatically timed or counted.
+
+**Review cases** shows participant, station and reason. Open a case to compare
+live/tag observations and their event IDs/validity. Choose valid current live/tag
+evidence, exclude the station, or explicitly accept CONTROL presence without a
+trusted timestamp. Presence cannot define start/finish. **Add manual decision**
+can add a last-resort CONTROL, START or FINISH time using native local input and
+the existing DST choices; it creates MANUAL evidence, never a fake radio punch.
+DNS/DNF/DSQ and return-to-automatic status are available as reasoned jury actions.
+Every result-affecting decision requires a reason and confirmation, with optional
+reviewer name (defaulting to configured local operator). Audit retains before,
+after, reason and time. Return to automatic or supersede with a new decision;
+old decisions are never deleted. New evidence can reopen a previously settled
+case. A display-name/language change alone does not.
+
+Participant detail explains every accepted station with source/provenance,
+repeat/timing status, manual ruling and history. Result completeness is separate
+from REGISTERED/RUNNING/FINISHED/DNS/DNF/DSQ: PROVISIONAL, COMPLETE or REVIEW_REQUIRED.
+It never changes sporting rank. Overview shows readouts/recovered/open/manual
+counts. The second-monitor display uses the same resolved rankings, showing only
+a simple localized review indicator, no raw readout/jury/technical information.
+Closing an event with open cases requires explicit provisional-close confirmation;
+closed events still permit deliberate corrections, archived events remain read-only.
+
+### M5 APIs, exports and live updates
+
+| Operation | Event-scoped endpoint (`/api/events/ID`) |
+| --- | --- |
+| Import exact capture / simulate | `POST /readouts/import`, `/readouts/simulate` |
+| Recent sessions / raw detail | `GET /readouts`, `/readouts/SESSION_ID` |
+| Current evidence / decision history | `GET /evidence?participant_id=ENTRY_ID` |
+| Review queue / history | `GET /reviews`, optionally `?include_resolved=true` |
+| Append ruling | `POST /decisions` with entry, station, action, source or manual time, reason/operator |
+| Reasoned status ruling | `POST /participants/ENTRY_ID/status` with status/reason/operator |
+| Detailed source/audit export | `GET /export/evidence` |
+
+`SELECT`, `EXCLUDE`, `PRESENCE`, `MANUAL`, `AUTO` are language-neutral decision
+values. A selectable source must currently be valid. Explicit manual/presence
+rulings address untrusted evidence; original times remain unchanged. Import body
+has exactly one `payload` or `raw_base64`, at most 1 MiB decoded. No arbitrary
+filesystem path is accepted by the browser API. Raw record bytes and exact
+capture base64 remain in detailed export. Ordinary result CSV appends
+`completeness,provenance,recovered_controls,open_reviews,manual_decision` to its
+stable columns; participant CSV is unchanged. Evidence JSON is a detailed
+version-1 export, not a substitute for the full SQLite/config backup.
+
+WebSocket version-1 invalidations add `tag_readout_completed` (session/UID/status),
+`reconciliation_updated`, `review_case_created`, `review_case_resolved`, plus the
+existing `ranking_changed`. Clients fetch current state; bounded independent
+queues preserve ingest when another client is slow/disconnected. On restart,
+pending captures are finalized and caches rebuilt without historical arrival
+notifications. **Recalculate** or `live reconcile EVENT_ID` rebuilds from source
+associations, all snapshot history, current configuration and applicable decisions.
+
+### M5 validation boundary
+
+Automated parser/domain/API/Chromium checks and the five-control recovery scenario
+validate simulated/imported data, including restart and immutable source facts.
+See [software acceptance and future physical steps](OPERATIONS.md#m5-software-acceptance--simulatorimport).
+Physical FoxIdent tag-readout integration is pending: current reference firmware
+does not implement the new reader contract. M3 physical Windows desk acceptance
+and M4 Windows installer acceptance remain separately pending. No M6 polish,
+other tag families, firmware changes or additional sporting strategy is included.
+
+## M5 final automated/software gates — 2026-10-08
+
+- Python 3.12.3, complete suite with provisioned Chromium: **344 passed**, including
+  all **17 browser workflows** (3 new M5 finish-desk workflows). This adds 76 cases
+  to the accepted 268-case M4 suite, without weakening earlier quality settings.
+- Python 3.13.15: **327 passed, 17 skipped** (browser execution deliberately not
+  enabled in this separate run). Both runs have one visible upstream Starlette
+  TestClient/httpx deprecation warning; it is not suppressed.
+- Ruff lint and format pass; strict mypy passes on **73 Python files**, both normal
+  Linux configuration and `--platform win32 --python-version 3.13`.
+- Setuptools sdist/wheel 0.5.0 build passes. Clean Python 3.12 venv installation
+  uses `pip --no-index --find-links` and local wheels only; `pip check` passes.
+- Installed and Linux PyInstaller 6.22.3 frozen desktop/CLI smoke pass: first-run
+  EN/DE settings/assets, HTTP/two WebSockets, tag-only recovery, backup/restore,
+  data-location copy, restart and clean shutdown preserve the same recovered result.
+  A Linux bundle is not a native Windows installer acceptance claim.
+- All **518 reference firmware hashes** match the pre-M5 golden manifest.
+  Migrations 1–4 and FoxBridge production code remain unchanged.
+
+The five-fox software acceptance test preserves live 1/3/5, recovers tag-only
+2/4, changes sporting rank, opens a conflicting Fox 3 case, records a reasoned
+LIVE ruling and reconstructs the same result after restart without changing a
+source punch. Chromium independently exercises finish-desk import, recovery,
+review, second-monitor update, unknown readout assignment and EN/DE simulator.
+The scale test covers 500 entries, 3,000 live punches and 200 readouts; snapshot
+rendering uses fewer than 25 queries and bounded recent-readout metadata.
+
+Existing UI tests were updated only for the additional native manual-time input;
+the legacy migration expectation now follows the ordered migration count rather
+than hardcoding version 4. Original source/scoring assertions remain intact.
+Human physical Windows/tag-reader acceptance is still pending. Software manual
+steps are documented for operator repetition; automated browser evidence is not
+misrepresented as a human hardware test. Remaining risks include actual AID and
+file access/provisioning, overwritten tag history, unreliable pre-sync time,
+reasoned jury mistakes, and long-running physical finish-desk operation.

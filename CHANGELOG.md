@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.0 — M5 offline DESFire readout and evidence reconciliation
+
+- Source-verified deployed eight-byte station file (uint32 LE time, uint16 LE event,
+  reserved byte, sync byte); documented AID comment/wire and unused struct discrepancies.
+- Versioned raw snapshot contract and small provider boundary; file import/simulator
+  support empty, partial/aborted/failed, malformed and changed/repeated readouts.
+- Additive migration 5: optional embedded event number, immutable tag captures/records
+  and append-only jury decisions; derived resolution/review caches. Migrations 1–4 unchanged.
+- Conservative LIVE/TAG_READOUT/MANUAL reconciliation recovers radio losses, respects
+  later tag overwrite/revisits, invalid time/event/window/source duplicates and exclusions.
+- Existing timing/controls/time/tie rules consume resolved observations, without synthetic
+  FoxCore records. START/FINISH conflicts require review; result completeness is separate.
+- EN/DE finish desk, review queue/history, unknown readout registration/assignment,
+  reasoned evidence/time/presence/status rulings and provenance in participant/result views.
+- Result CSV appends provenance/recovery/review columns; separate detailed evidence JSON
+  retains raw captures and audit. Restart/recalculation and M4 backup/restore preserve facts.
+- Added parser/domain/API/Chromium/CLI/scale/acceptance coverage and installed/frozen smoke
+  for recovered controls. Future reader firmware requirements are explicit; no firmware,
+  other chip-family provider, physical readout claim or M6 polish is included.
+
+M5 software acceptance uses simulated/imported data. Physical tag-readout integration,
+M3 Windows desk acceptance and M4 Windows installer acceptance remain separately pending.
+Final software gates: 344 tests pass including 17 Chromium workflows; Python 3.13
+non-browser run passes 327 with 17 browser skips. Ruff lint/format and strict mypy
+(Linux and Windows-platform checks), sdist/wheel, offline wheel install and Linux
+frozen/installed setup/HTTP/WebSocket/evidence backup/restart smoke pass. All 518
+reference firmware hashes remain unchanged. One upstream TestClient warning remains.
+
 ## M4 maintenance — Windows release-build bootstrap
 
 The Windows build script now selects a supported Python and Inno Setup compiler, creates/reuses an

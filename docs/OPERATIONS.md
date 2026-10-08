@@ -1,4 +1,4 @@
-# FoxSuite operations — FoxCore, FoxBridge and FoxLive
+# FoxSuite operations — live ingest, competition desk and offline evidence
 
 ## Windows installation
 
@@ -285,7 +285,7 @@ controls. Multiple windows update/reconnect independently without refresh. Each 
 EN/DE; the origin's saved preference applies on reload. Without authentication this is not a secured
 public endpoint: keep localhost or a trusted isolated network, never port-forward the server.
 
-Back up the DB/config before opening 0.3.0: additive schema 3 cannot be opened by older M1/M2 binaries.
+Back up the DB/config before opening 0.5.0: additive schema 5 cannot be opened by older binaries.
 Stop other `run`/`bridge run`/`live run` processes before opening the physical base; one writer/owner
 process is supported. FoxLive requires neither FjwW nor a virtual COM pair. Keep `[serial]`, DB and
 TimeSync settings; add:
@@ -395,6 +395,105 @@ address explicitly exposes competition data and administration. Use only a trust
 port-forward. There is no arbitrary-path HTTP file access, CDN or telemetry. Keep a backup of closed
 DB plus TOML; online backup must use SQLite backup API. Participant/results CSV do not contain the
 raw facts, associations or audit and are not a complete backup.
+
+## M5 software acceptance — simulator/import
+
+Use a separate test DB and back it up before upgrading to schema 5. Physical
+readout firmware is not available in this milestone. File/simulator mode is
+explicitly identified on **Event → Readout / Finish / Auslesen / Ziel**; it does
+not pretend a USB reader is connected. No raw JSON editing is needed in that UI.
+
+1. Create/open a PREDEFINED_START test event, category and participant with a
+   known UID. Set event mass start and CONTROL stations Fox 1–5 plus FINISH.
+   In advanced event settings set the embedded tag event number to the number
+   used by your test records (for example 1825 only in this isolated fixture).
+2. Start the event. Supply live source punches for Fox 1, 3, 5 and finish using
+   the existing FoxCore simulator/historical association. Confirm three controls
+   and a valid finished result. Add another finisher with four controls to observe
+   the sporting rank change. Do not replay source records into an operating race.
+3. Open **Readout / Finish**. Select the participant in the simulator, check Fox
+   1–5 and set their visit times. Make 1/3/5 match the live whole-second instants.
+   Alternatively import a captured version-1 readout file.
+4. Submit. Summary should show three matches and **two recovered controls**.
+   Participant now has five distinct controls, provenance RECOVERED and improved
+   category rank. Participant detail explains which records counted and why.
+5. Read the identical tag again: a new snapshot is retained, but no extra control,
+   source punch or timing visit is invented.
+6. Read a changed Fox 3 timestamp that matches no live visit. One review case
+   opens; controls remain provisionally counted, with review-required indicator.
+   START/FINISH conflicts instead withhold that timing until a ruling.
+7. Open the case. Select LIVE evidence, give a reason (e.g. station marshal
+   confirmation), optionally a reviewer name, and confirm. Case closes; result
+   carries MANUAL provenance. Audit shows the source comparison and chosen action.
+8. Inspect participant detail, review history and **Detailed evidence export**.
+   Original raw snapshots/live facts and prior decisions remain. Ordinary result
+   CSV carries completeness/provenance/recovered/review/manual columns, not raw bytes.
+9. Stop/restart FoxLive using the same data folder. Rankings, snapshots, decisions
+   and review history reconstruct identically; old captures are not new arrivals.
+10. Force **Recalculate** twice: unchanged inputs give identical results. Confirm
+    no new FoxCore source punches were created by readout or adjudication.
+
+The automated acceptance scenario and Chromium finish-desk workflow exercise
+these recovery/conflict/ranking/audit steps. This is software-level validation
+with simulated/imported tag data, not physical reader or Windows acceptance.
+
+Also exercise PARTIAL/ABORTED/FAILED, wrong-event/unsynchronized/malformed files,
+unknown station and unknown UID. Good files in a partial/aborted snapshot remain
+usable, with review and retry; failed acquisition never automatically scores.
+Unknown tags use **Assign or register** and the existing registration flow.
+After ownership confirmation, historical readouts reconcile immediately, without
+fabricating live evidence. A tag already on another active entry is rejected.
+
+### CLI recovery/debugging (advanced)
+
+These commands operate on the same persisted evidence and should not run as a
+second writer beside the normal desktop process. IDs below are advanced API/CLI
+references, not operator form inputs. Use Unix whole-second test times and the
+event's configured tag number:
+
+```sh
+foxsuite --db data/test.db live readout import EVENT_ID captured-readout.json
+foxsuite --db data/test.db live readout simulate EVENT_ID 046365525C6180 --record 2:UNIX_SECONDS
+foxsuite --db data/test.db live readout simulate EVENT_ID 046365525C6180 --status PARTIAL --unsynchronized --record 4:UNIX_SECONDS
+foxsuite --db data/test.db live reconcile EVENT_ID
+foxsuite --db data/test.db live review list EVENT_ID
+foxsuite --db data/test.db live review resolve EVENT_ID ENTRY_ID STATION_ID SELECT --source-type LIVE --source-id PUNCH_ID --reason "Confirmed by station marshal"
+foxsuite --db data/test.db live review resolve EVENT_ID ENTRY_ID STATION_ID AUTO --reason "Return to automatic review"
+```
+
+Use the browser for reasoned manual CONTROL/START/FINISH time or DNS/DNF/DSQ
+rulings. Time pickers and DST occurrence choices preserve UTC source facts;
+manual evidence never overwrites an original timestamp. CONTROL presence-only
+acceptance counts a station explicitly without using untrusted time. Closing with
+open cases requires provisional-close confirmation. Archive remains read-only.
+
+Backup via System → Settings includes the new snapshots/records/decisions and
+all prior milestones. Save configuration and ordinary CSV exports too; only the
+database is a full recovery source. Never live-copy the main DB without WAL or
+SQLite backup. Detailed evidence JSON preserves exact capture base64 and raw file
+bytes for disputes/parser improvements, but is not a full restore archive.
+
+### Future physical offline readout acceptance — pending
+
+After a separate firmware/provider task implements
+[FoxIdent Readout Firmware Requirements](TAG_READOUT.md#foxident-readout-firmware-requirements):
+
+- Verify actual application bytes, file discovery/access and deployed eight-byte
+  writer layout on real DESFire tags; record whether zero files mean unwritten.
+- Read a physical tag via USB into a canonical snapshot. Check UID, raw file IDs,
+  event/sync bytes and immutable raw capture against independent acquisition.
+- Isolate one station from radio: its stored tag control must recover while live
+  controls stay unchanged; overwritten revisit must match any legitimate live visit.
+- Validate start/finish recovery, conflict review, reasoned manual adjudication and
+  source/audit provenance. Never substitute read time for visit time.
+- Remove the tag mid-read and test partial/aborted/timeout/retry; missing files
+  must not invalidate live controls. Repeat/changed readouts must stay traceable.
+- Check reconnect/restart, USB identity, event window and pre-sync flag behavior,
+  and long-running Windows finish-desk performance.
+
+This physical path has **not** been tested. The M3 Windows registration/live/
+second-monitor checklist below and M4 clean-Windows installer checklist remain
+separate outstanding acceptance activities. No M6 work is included.
 
 ## FoxLive Windows hardware smoke test — not yet performed
 

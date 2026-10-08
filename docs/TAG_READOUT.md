@@ -4,7 +4,9 @@
 
 Authoritative files are `reference/FoxIdent/src/RFIDManager.cpp` (especially
 `selectApplication`, `readTag`, `writeTimestampFile`), `include/Config.h` and
-`src/TimeManager.cpp`. Reference firmware is read-only.
+`src/TimeManager.cpp`. Reference firmware is read-only. The supplementary
+`reference/FoxIdent_V1.0.0_LLM_CONTEXT.md` is orientation, not a replacement for
+the writer implementation.
 
 Each successful station visit writes eight bytes at offset zero using wrapped
 DESFire WriteData (`90 3D`), with file number equal to the **low byte** of the
@@ -34,6 +36,18 @@ firmware must validate application selection on deployed tags and report the
 actual application bytes. M5's capture contract identifies the source format,
 not an unverified numeric AID.
 
+Both firmware trees' `include/Types.h` declare an unused `TagFileData` containing
+two `uint32_t` fields. That declaration is **not** the deployed writer layout:
+`RFIDManager::writeTimestampFile` writes a 16-bit event ID, reserved byte and
+sync flag. No operational use of that struct was found. The supplementary
+context describes the eight-byte writer layout; readers must follow the actual
+writer, not reinterpret its last four bytes as a 32-bit event ID.
+
+`reference/FoxIdentServer/src/BaseLoraManager.cpp::printTag` emits live tag JSON
+without tag file contents, embedded event ID or synchronization flag. The
+operational TagPacket structures likewise do not carry these readout fields.
+M5 therefore does not infer them from live packets or alter the existing parser.
+
 The current operational firmware only selects and writes an existing file. It
 does not create files, enumerate them, or implement a USB readout mode. DESFire
 GetFileIDs/ReadData discovery is a **future acquisition requirement**, not a
@@ -59,6 +73,19 @@ Sessions are COMPLETE, PARTIAL, FAILED or ABORTED. Failed file attempts and
 unknown files are retained. A bad file never discards successfully read files.
 Simulator and file providers are included; no physical USB reader is claimed.
 
+The PC persists the exact capture before parsing. Invalid UTF-8, malformed JSON,
+bad UID, unsupported format and malformed file bytes remain recoverable as failed
+or partial sessions. Completed source snapshots and records cannot be updated or
+deleted. A pending capture is finalized on recovery; it is not published as a new
+arrival. The import API accepts either UTF-8 `payload` or `raw_base64` (exactly
+one); browser file upload uses base64 to preserve even invalid UTF-8. Detailed
+evidence export includes `raw_payload_base64` and each record's raw bytes.
+
+File/simulator acquisition produces the same canonical model. CLI import accepts
+one bounded snapshot per file; the future stream adapter splits NDJSON lines
+and passes each snapshot through that path. No new serial reader is implemented
+in M5. `reader` is diagnostic identity, not an event/participant database key.
+
 ## FoxIdent Readout Firmware Requirements
 
 Version 1 is newline-delimited UTF-8 JSON, one **completed snapshot per line**:
@@ -79,6 +106,11 @@ Version 1 is newline-delimited UTF-8 JSON, one **completed snapshot per line**:
 * On file failure include `{"file_id":3,"data":null,"error":"timeout"}`.
   Use PARTIAL when some files succeeded; FAILED when acquisition failed;
   ABORTED when removed/cancelled. Include diagnostic strings in `errors`.
+  A final envelope must still be emitted after removal/timeout when the UID is
+  known. If no UID was acquired, report failure with `uid:null`; FoxSuite retains
+  it diagnostically without associating it to a competitor. There are no separate
+  start/record/end messages in version 1: buffer the bounded snapshot and emit
+  its final status once. A retry is a new physical operation and new envelope.
 * COMPLETE means enumeration and all relevant reads completed, including a
   legitimately empty directory (`records: []`). PARTIAL/ABORTED must never be
   used to infer absence. Absence even in COMPLETE never invalidates live data.

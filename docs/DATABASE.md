@@ -1,4 +1,4 @@
-# SQLite schema, version 4
+# SQLite schema, version 5
 
 M4 introduces **no database migration** and changes no core, bridge or live source/domain tables.
 Desktop storage is outside installation, at `%LOCALAPPDATA%\FoxSuite\data\foxsuite.db` by default.
@@ -165,3 +165,43 @@ scoring. All accepted timing, duplicate, exclusion and tie semantics remain unch
 ## Backup
 
 Stop ingest gracefully, then copy the closed database and any surviving WAL/SHM alongside it. Never copy only the main DB while a writer is active. Use SQLite/Python's backup API for online backup. Raw records are the recovery source and regression corpus; no automatic retention/deletion exists.
+
+## M5 — additive migration 5 and independent evidence
+
+Migrations 1–4 are unchanged. Version 5 adds nullable `live_events.tag_event_id`
+(0–65535) and the tables below. Existing events default to unknown, not the
+development firmware event ID. Migration preserves live associations, entries,
+rankings, audit, raw/punch facts and bridge deliveries. Older applications reject
+schema 5; use a safety backup before upgrading. No destructive downgrade exists.
+
+| Table | Purpose |
+| --- | --- |
+| tag_readout_sessions | Event-scoped exact capture BLOB, PC UTC time, provider/reader/UID, completion status and errors |
+| tag_readout_records | Snapshot FK, discovered file ID, original JSON value, decoded raw BLOB, parsed timestamp/event/sync and parse error/status |
+| live_evidence_decisions | Append-only entry/station ruling, source reference or manual time, reviewed-input fingerprint, reason/operator/UTC time |
+| live_resolutions | Rebuildable JSON resolved view keyed by event/UID/station, with entry/source/provenance/status references |
+| live_review_cases | Stable event/UID/station case, OPEN/RESOLVED, evidence summary and latest decision FK |
+
+Indexes support event/UID readouts, session/file records, event/entry/station
+decision history and event/status review queues. LIVE evidence references the
+original punch ID rather than copying source punches. TAG references a record
+and snapshot; MANUAL references a decision. The typed cache carries those IDs;
+source references are validated by the adjudication service before selection.
+
+Raw snapshot insertion commits as PENDING before parsing. Final records/status
+commit before interpretation/audit/results. Triggers forbid changes to raw
+capture identity even while pending, and forbid all update/delete on records,
+completed snapshots and decisions. A crash can leave a pending or underived
+snapshot: startup finalizes/rebuilds it quietly, without a new-arrival event.
+Storage failure is visible, never treated as successful evidence processing.
+
+Resolutions/review cases and existing result caches are mutable derived data,
+not source facts. Current source bytes/configuration and the latest applicable
+append-only decision reconstruct them deterministically. Superseded decisions
+remain in history; changed evidence reopens review. Entry status rulings use the
+existing event audit with reason/operator/before/after. No readout, recovery or
+manual adjudication inserts or edits a FoxCore raw event/punch.
+
+M4 online backup/restore and explicit copy/move workflows include all new tables
+automatically through SQLite backup, with the same durability/atomicity checks.
+The evidence JSON export supplements the database backup, not replaces it.

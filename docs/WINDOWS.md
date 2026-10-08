@@ -107,7 +107,7 @@ gate retains its existing optional-browser skips when that flag is unset.
 The script checks tests/lint/format/strict types, builds wheel/sdist, bundles both windowed `FoxSuite.exe`
 and optional console `foxsuite-cli.exe`, tests frozen CLI and desktop HTTP/WebSocket/backup/restart
 startup with `packaging/smoke.py`, then compiles
-`dist\installer\FoxSuite-0.4.0-windows-x64-setup.exe` and prints its SHA-256.
+`dist\installer\FoxSuite-0.5.0-windows-x64-setup.exe` and prints its SHA-256.
 The folder `dist\FoxSuite` must be distributed as a whole if using the advanced portable path;
 an executable alone is insufficient. Data still lives in the user root, not the portable folder.
 Build-time dependencies/Internet are permitted on the release machine; runtime is offline.

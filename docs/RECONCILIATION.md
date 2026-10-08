@@ -32,6 +32,19 @@ files not attempted. Missing files never invalidate valid live observations.
 * LIVE duplicate/exclusion/invalidity classification remains unchanged. Valid
   tag evidence can recover a station despite an invalid live observation, but
   does not make that original observation valid.
+* A tag timestamp matching an explicitly excluded live observation creates
+  EXCLUDED_LIVE_MATCH review; it cannot silently undo the exclusion. A jury can
+  explicitly select valid tag evidence or make a new ruling.
+* A correct-event tag explicitly marked unsynchronized makes an equal-numbered
+  live time untrusted in the resolved view too. The live source stays unchanged;
+  matching invalid numbers never confirms timing. Other valid live visits remain
+  usable. Wrong-event tag data does not invalidate current-event live evidence.
+
+Tag time uses the event minimum/uint32/window guards, plus a future-clock guard
+against PC read time. Historical offline punches are not rejected merely because
+readout occurred long after the visit: radio receive-age validation applies only
+to LIVE evidence. Failed sessions cannot automatically contribute their records;
+good records in PARTIAL/ABORTED sessions can, with an incomplete-read review.
 
 Resolved accepted observations use the existing earliest valid control/start and
 finish-after-start logic. Readout time is never a replacement scoring timestamp.
@@ -39,6 +52,15 @@ Competition status and result completeness are independent: PROVISIONAL (no
 successful readout), COMPLETE (review-free readout), REVIEW_REQUIRED (open case).
 Completeness does not alter sporting ranks; unresolved timing cannot fabricate
 an elapsed time. Public displays expose only a concise provisional indicator.
+When offline observations tie within the same second, their private scoring
+order is START, CONTROL, FINISH, then stable source-record identity. No fractional
+time is invented. All-live ties retain M3's original source-ID ordering. These
+sort keys are not FoxCore IDs and are never persisted as source punches.
+
+A later COMPLETE read resolves the prior incomplete-session case. The latest
+attempt per file remains current even if malformed; earlier snapshots are kept
+for review/export, not silently substituted. A later snapshot that never attempts
+a file does not erase that file's previous evidence.
 
 ## Adjudication and provenance
 
@@ -54,16 +76,30 @@ Decisions append, never replace/delete. AUTO supersedes a ruling and restores
 automatic review. A decision references the evidence fingerprint it reviewed;
 new/different evidence reopens review instead of silently inheriting an old
 ruling. DNS/DNF/DSQ use the existing audited EventEntry status workflow.
+The finish-desk jury action for DNS/DNF/DSQ (or return to automatic status) also
+requires a reason and optional reviewer label. A manual observation without a
+tag uses a private entry identity internally, never an invented RFID UID.
+Fingerprints cover evidence, entry identity/start, timing/window/validity
+configuration and station role/enabled state. Display-name, language, lifecycle
+and ordering changes alone do not revoke rulings. A changed scoring input does.
 
 Each resolved observation references its LIVE punch, TAG record or MANUAL
 decision. Participant detail and evidence export retain all observations,
 including superseded snapshots. Ordinary result export adds completeness,
 recovered-control count, review and manual indicators, not raw bytes.
+LIVE, CONFIRMED, RECOVERED and MANUAL summarize provenance; CONFIRMED means there
+is corroborating tag evidence, not that every visit was proven by a complete tag
+history. Readout summaries show the **current** reconciliation for that UID,
+not a frozen result from the time of the selected historical snapshot.
 
 Closing with open cases needs explicit confirmation. Closing does not destroy
 or permanently freeze evidence; archive remains read-only. Recalculation/restart
 rebuild derived state from associations, source facts and latest applicable
 decisions without publishing old snapshots as newly arrived readouts.
+Live/readout intake recalculates the affected UID and bulk category ranks;
+configuration changes and explicit recalculation rebuild the full event. No UI
+render triggers full recalculation. Source duplicate arrival does not invalidate
+a decision fingerprint. Original/repeated captures stay individually auditable.
 
 ## Validation boundary
 

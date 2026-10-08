@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -17,6 +18,7 @@ import websockets
 
 from foxcore.config import Config
 from foxlive.config import LiveConfig
+from foxlive.readout import capture, station_record
 from foxops.settings import Locations, Settings, load, save
 
 
@@ -71,6 +73,7 @@ def main() -> None:
                 "/ops/static/en.json",
                 "/ops/static/de.json",
                 "/static/desk.js",
+                "/static/evidence.js",
                 "/live/display",
             ):
                 with urlopen(base + asset, timeout=5) as response:
@@ -82,8 +85,57 @@ def main() -> None:
             assert load(locations).completed and load(locations).language == "de"
             event = api(
                 "/api/events",
-                {"name": "Offline smoke", "date": "2026-10-08", "timezone": "Europe/Berlin"},
+                {
+                    "name": "Offline smoke",
+                    "date": "2026-10-08",
+                    "timezone": "Europe/Berlin",
+                    "timing_mode": "PREDEFINED_START",
+                    "default_start_at": datetime.fromtimestamp(
+                        int(time.time()) - 60, UTC
+                    ).isoformat(),
+                    "tag_event_id": 1825,
+                },
             )
+            root = f"/api/events/{event['id']}"
+            category = api(
+                "/api/master/categories",
+                {"code": "OPEN", "display_name_en": "Open", "display_name_de": "Offen"},
+            )
+            api(root + "/categories", {"category_id": category["id"]})
+            runner = api(
+                "/api/runners", {"first_name": "Offline", "last_name": "Runner", "birth_year": 1980}
+            )
+            entry = api(
+                root + "/participants",
+                {
+                    "runner_id": runner["id"],
+                    "start_number": 1,
+                    "category_id": category["id"],
+                    "uid": "046365525C6180",
+                },
+            )
+            # API uses PUT for station setup; this helper otherwise uses POST/GET.
+            request = Request(
+                base + root + "/stations/1",
+                method="PUT",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(
+                    {"station_id": 1, "display_name": "Fox 1", "role": "CONTROL"}
+                ).encode(),
+            )
+            with urlopen(request, timeout=5) as response:
+                assert response.status == 200
+            session = api(
+                root + "/readouts/import",
+                {
+                    "payload": capture(
+                        "046365525C6180", [station_record(1, int(time.time()), 1825)]
+                    ).decode()
+                },
+            )
+            assert session["summary"]["recovered"] == 1
+            result = api(root + f"/participants/{entry['id']}")["result"]
+            assert result["controls"] == 1 and result["provenance"] == "RECOVERED"
 
             async def sockets() -> None:
                 async with (
@@ -101,6 +153,7 @@ def main() -> None:
             api("/api/events", {"name": "Later event", "date": "2026-10-09"})
             api("/api/ops/restore", {"name": archive, "confirmed": True})
             wait(lambda: len(api("/api/events")) == 1)
+            assert api(root + f"/participants/{entry['id']}")["result"] == result
             destination = Path(folder) / "copied"
             api(
                 "/api/ops/location",
@@ -120,6 +173,7 @@ def main() -> None:
             )
             wait(lambda: api("/api/ops/settings")["completed"] is True)
             assert len(api("/api/events")) == 1 and api("/api/source-punches") == []
+            assert api(root + f"/participants/{entry['id']}")["result"] == result
             api("/api/ops/shutdown", {})
             assert process.wait(timeout=20) == 0
         finally:
@@ -127,7 +181,7 @@ def main() -> None:
                 process.terminate()
                 process.wait(timeout=20)
     print(
-        "Desktop setup, offline assets, HTTP/WebSockets, backup/restore, copy, restart and shutdown: PASS"
+        "Desktop setup, offline assets, HTTP/WebSockets, M5 recovery, backup/restore, copy, restart and shutdown: PASS"
     )
 
 

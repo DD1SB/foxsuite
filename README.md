@@ -14,6 +14,10 @@ FoxLive: M3 implemented and automatically tested; physical hardware/manual valid
 M4 adds a desktop operations layer and Windows release recipes; clean-Windows installer/USB
 acceptance remains pending. M3 physical acceptance is not implied by M4 automated checks.
 
+M5 adds DESFire capture import/simulation, offline recovery, evidence reconciliation,
+review and audited jury decisions. Software validation uses simulated/imported tag data;
+physical FoxIdent tag-readout integration is pending. M6 has not been started.
+
 Runner RFID → FoxIdent → LoRa → FoxIdentServer → USB → foxcore → FoxBridge → COM pair → FjwW SI-C.
 
 M1 includes typed TOML config, reconnecting serial, source-derived parsing, canonical punches/UIDs,
@@ -159,10 +163,39 @@ Participant/master tables offer search and 50-row pages. **Open live display / L
 opens a separate read-only tab for monitor 2, with large results/punches, EN/DE, fullscreen and automatic
 reconnect. It shares scoring state, but excludes raw RFID, COM/debug and administrative controls.
 M3 assumes one trusted local operator process; non-local binding has no authentication and is unsafe
-on untrusted networks. Back up the DB and TOML before upgrading to migration 4; older binaries reject it.
+on untrusted networks. Back up the DB and TOML before upgrading to migration 5; older binaries reject it.
 Legacy registrations are preserved conservatively as separate runners with unknown birth data;
 legacy category names/codes need review. No identity is silently merged or birth information invented.
 See [FoxLive](docs/FOXLIVE.md) for complete rules, offline test workflow, API and Windows smoke checklist.
+
+### Offline readout and evidence (M5)
+
+Event → **Readout / Finish / Auslesen / Ziel** imports captured DESFire snapshots or
+runs the test simulator. Set the embedded 16-bit tag event number in advanced event
+settings; it is not the database event ID. Valid tag-only controls recover lost
+radio data. Matching any legitimate live revisit confirms evidence; a tag is not
+a full chronological history. Source snapshots, live punches and manual decisions
+stay separate and immutable. No new reader firmware or serial parser is included.
+
+Event → **Review cases / Prüffälle** compares discrepancies. Select live/tag evidence,
+exclude, explicitly accept control presence, or add a reasoned manual control/time
+ruling. START/FINISH conflicts require review rather than silently changing elapsed
+time. Unknown readout tags reuse existing registration/assignment. Participant
+detail explains provenance; results/export add completeness/recovery/review indicators
+without changing sporting ranks. All normal workflows support EN/DE.
+
+```sh
+foxsuite --db data/test.db live readout import EVENT_ID captured-readout.json
+foxsuite --db data/test.db live readout simulate EVENT_ID 046365525C6180 --record 2:UNIX_SECONDS
+foxsuite --db data/test.db live reconcile EVENT_ID
+foxsuite --db data/test.db live review list EVENT_ID
+```
+
+See [verified tag layout and future firmware contract](docs/TAG_READOUT.md),
+[reconciliation rules](docs/RECONCILIATION.md) and
+[software acceptance procedure](docs/OPERATIONS.md#m5-software-acceptance--simulatorimport).
+Only current FoxIdent DESFire format is supported; no other chip-family adapter,
+blind tag/live priority or M6 visual redesign is implemented.
 
 ## Development and architecture
 
@@ -174,9 +207,15 @@ mypy
 python -m build
 ```
 
-Tests require no hardware. With M4, 254 tests pass on Python 3.12, including all 14 Chromium
-workflows and all accepted M1/M2/M3 regressions. Without optional browser execution, 240 pass
-and 14 skip. Ruff lint/format and strict mypy pass on 63 Python source/test files.
+Tests require no hardware. M5 validates parser/provider, readout sessions, conservative
+reconciliation, timing/manual review, source immutability, unknown-tag assignment,
+restart, browser flows and event-scale data alongside all accepted M1–M4 regressions.
+Run the complete Chromium-enabled suite with the command below; final M5 validation
+results are recorded in [FoxLive](docs/FOXLIVE.md).
+Final M5 gates: **344 tests passed including 17 Chromium workflows**; the separate
+Python 3.13 run passed 327 with only those 17 browser tests skipped. Ruff/strict mypy,
+sdist/wheel, clean offline installation and installed/Linux-frozen HTTP/WebSocket,
+recovery/backup/restart smoke pass. No Windows or physical-reader acceptance is implied.
 Lint, formatting, strict typing, sdist/wheel and clean offline installed-package
 HTTP/WebSocket/simulator smoke pass. All 518
 reference hashes remain unchanged. One upstream Starlette HTTPX deprecation warning is not suppressed.
@@ -194,7 +233,8 @@ migrations/recovery/dedupe; [operations](docs/OPERATIONS.md) includes the hardwa
 
 Repository: read-only `reference/`; shared `src/foxcore/`; gateway `src/foxbridge/` (config, mapping,
 encoder/time, delivery persistence/service, output and CLI); standalone `src/foxlive/` (domain,
-scoring, persistence, service, CSV, API, CLI, local templates/assets); operations `src/foxops/`
+scoring, persistence, service, readout/providers, evidence/reconciliation, CSV, API, CLI,
+local templates/assets); operations `src/foxops/`
 (desktop launcher, user settings, ports, backup/restore, setup assets); `packaging/windows/`
 (maintainer build/bundle/installer recipes); hardware-free `tests/` with a published protocol vector;
 `config/`; `docs/`. Flat modules avoid speculative future packages.
@@ -204,4 +244,7 @@ operation remain unvalidated. Serial write is not receiver acknowledgement, and 
 can duplicate competition data. FoxLive is implemented but its physical Windows desk acceptance and
 long-running Windows field operation are still pending. M4 Windows installer execution, clean-PC
 deployment/upgrade/uninstall and real USB first-run testing remain pending; Linux self-contained
-bundle/installed-package checks are not Windows acceptance. No later feature milestone is included.
+bundle/installed-package checks are not Windows acceptance. Physical offline reader acquisition,
+DESFire application/file provisioning and long-running readout desk acceptance remain pending.
+Manual/review provenance is transparent, not an automatic guarantee of correctness; explicit jury
+actions can change results and require reasons. No M6 feature or visual-polish work is included.
