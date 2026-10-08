@@ -36,6 +36,19 @@ def translate(key: str, lang: str = "en", **values: Any) -> str:
 
 
 ERROR_KEYS = {
+    "Readout exceeds 1 MiB": "readout.too_large",
+    "Provide exactly one readout capture": "readout.error_capture",
+    "Invalid readout capture encoding": "readout.error_capture",
+    "Readout does not exist": "readout.error_missing",
+    "Configure the event tag ID before simulating a readout": "readout.error_event",
+    "Unsupported readout scenario": "readout.error_scenario",
+    "Decision requires a reason": "review.error_reason",
+    "Unsupported adjudication action": "review.error_action",
+    "Station is not enabled for this event": "review.error_station",
+    "Presence-only decisions are allowed for controls only": "review.error_presence",
+    "Manual time fails event timestamp validation": "review.error_time",
+    "Select valid current evidence or enter an explicit manual time": "review.error_select",
+    "Open review cases remain; confirm close with provisional results": "review.error_close",
     "Runner does not exist": "error.runner_missing",
     "Runner is inactive": "error.runner_inactive",
     "Runner names cannot be blank": "error.names_blank",

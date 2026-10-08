@@ -38,6 +38,7 @@ def display_state(service: LiveService, event_id: int | None = None) -> dict[str
                     "elapsed",
                     "rank",
                     "eligible",
+                    "completeness",
                 ),
             )
             for r in state["results"]

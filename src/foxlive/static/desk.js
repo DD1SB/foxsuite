@@ -24,7 +24,7 @@ function table(keys, rows) {
   return `<table><thead><tr>${keys.map(k => `<th>${escape(t(k))}</th>`).join("")}</tr></thead><tbody>${rows.join("") || `<tr><td colspan="${keys.length}">${escape(t("common.empty"))}</td></tr>`}</tbody></table>`;
 }
 function problem(key, values = {}) { const e = new Error(); e.key = key; e.values = values; return e; }
-const fieldKeys = {name:"common.name", date:"event.date", timezone:"event.timezone", timing_mode:"event.timing", competition_start_at:"event.window_start", competition_end_at:"event.window_end", default_start_at:"event.default_start", code:"category.code", display_name:"common.name", display_name_en:"category.name_en", display_name_de:"category.name_de", birth_year:"runner.birth_year", birth_date:"runner.birth_date", runner_id:"runner.choose", club_id:"participant.club", checked_in:"registration.checked_in", start_number:"participant.start_number", first_name:"participant.first_name", last_name:"participant.last_name", category_id:"category.label", uid:"rfid.label", club:"participant.club", start_time:"participant.predefined_start", manual_status:"participant.status", station_id:"station.number", role:"station.role", reason:"history.reason", text:"csv.text"};
+const fieldKeys = {name:"common.name", date:"event.date", timezone:"event.timezone", timing_mode:"event.timing", competition_start_at:"event.window_start", competition_end_at:"event.window_end", default_start_at:"event.default_start", tag_event_id:"readout.event_id", timestamp:"review.manual_time", code:"category.code", display_name:"common.name", display_name_en:"category.name_en", display_name_de:"category.name_de", birth_year:"runner.birth_year", birth_date:"runner.birth_date", runner_id:"runner.choose", club_id:"participant.club", checked_in:"registration.checked_in", start_number:"participant.start_number", first_name:"participant.first_name", last_name:"participant.last_name", category_id:"category.label", uid:"rfid.label", club:"participant.club", start_time:"participant.predefined_start", manual_status:"participant.status", station_id:"station.number", role:"station.role", reason:"history.reason", text:"csv.text"};
 function message(detail) {
   if (typeof detail === "string") return detail;
   return (detail || []).map(e => `${t(fieldKeys[e.loc?.at(-1)] || "common.details")}: ${e.msg}`).join(" · ");
@@ -211,9 +211,9 @@ function render() {
   ])).slice(0,20));
   const resultRow = r => { const p = participants.get(r.participant_id); return row([
     escape(r.rank ?? "—"), p?.start_number, `<button data-detail="${p?.id}">${escape(p?.first_name)} ${escape(p?.last_name)}</button>`, r.controls, escape(status("participant",r.status)),
-    r.status === "RUNNING" && r.start !== null ? `<span data-running-start="${r.start}">${duration(Math.max(0,Math.floor(Date.now()/1000)-r.start))}</span> (${escape(t("ranking.provisional_note"))})` : duration(r.elapsed), escape(time(r.start)), escape(time(r.finish))
+    r.status === "RUNNING" && r.start !== null ? `<span data-running-start="${r.start}">${duration(Math.max(0,Math.floor(Date.now()/1000)-r.start))}</span> (${escape(t("ranking.provisional_note"))})` : duration(r.elapsed), escape(time(r.start)), escape(time(r.finish)), escape(t('evidence.'+(r.open_reviews?'REVIEW_REQUIRED':r.provenance)))
   ]); };
-  const rankingHeaders = ["ranking.rank","participant.start_number","participant.label","ranking.controls","participant.status","time.elapsed","time.start","time.finish"];
+  const rankingHeaders = ["ranking.rank","participant.start_number","participant.label","ranking.controls","participant.status","time.elapsed","time.start","time.finish","review.outcome"];
   $("rankings").innerHTML = s.categories.map(c => { const group = s.results.filter(r => r.category_id === c.id); return `<h4>${escape(categoryLabel(c))}${c.active ? "" : " · " + escape(t("common.inactive"))}</h4><h5>${escape(t("ranking.finished"))}</h5>${table(rankingHeaders,group.filter(r => r.rank !== null).map(resultRow))}<h5>${escape(t("ranking.provisional"))}</h5>${table(rankingHeaders,group.filter(r => r.rank === null).map(resultRow))}`; }).join("") || escape(t("category.none"));
   renderParticipants();
   const enabled=new Map(s.categories.map(c=>[c.id,c]));
@@ -226,6 +226,7 @@ function render() {
   document.querySelectorAll("[data-state]").forEach(button => button.disabled = !e || e.state === "ARCHIVED");
   tagView(); tick();
   renderMasters();
+  window.FoxLiveEvidence?.render();
 }
 function renderParticipants() {
   if(!snapshot) return; const s=snapshot, categories=new Map(s.categories.map(c=>[c.id,c])), results=new Map(s.results.map(r=>[r.participant_id,r]));
@@ -332,9 +333,10 @@ async function confirmCaptured() {
   const tag = capture.detected, ctx = context(), generation = captureGeneration;
   if (!tag || capture.context !== ctx) throw problem("rfid.stale");
   // Recheck availability at confirmation. The existing atomic participant update is authoritative.
-  const batch = await api(requireEvent()+"/rfid-candidates?after_id="+(tag.id-1));
+  const batch = tag.readout_id ? await api(requireEvent()+"/readouts/"+tag.readout_id) : await api(requireEvent()+"/rfid-candidates?after_id="+(tag.id-1));
   if (ctx !== context() || generation !== captureGeneration) throw problem("rfid.stale");
-  if (!batch.items.some(v => v.uid === tag.uid)) { cancelTag(); throw problem("rfid.other_owner"); }
+  const available = tag.readout_id ? batch.uid===tag.uid && (!batch.participant_id || batch.participant_id===Number($('participant-form').dataset.entityId)) : batch.items.some(v => v.uid === tag.uid);
+  if (!available) { cancelTag(); throw problem("rfid.other_owner"); }
   await saveParticipant(tag);
 }
 $("confirm-tag").onclick = action(confirmCaptured);
@@ -359,6 +361,7 @@ function newEvent() {
 $("event-form").onsubmit = action(async () => {
   const form = $("event-form"), data = formData(form), id = form.dataset.entityId;
   await dates(form,data,data.timezone);
+  data.tag_event_id = field(form,'tag_event_id')?.value ? Number(field(form,'tag_event_id').value) : null;
   if (id) { const old = snapshot.events.find(e => e.id === Number(id)); data.minimum_unix_timestamp = old.minimum_unix_timestamp; data.maximum_receive_skew_seconds = old.maximum_receive_skew_seconds; }
   const saved = await api(id ? `/api/events/${id}` : "/api/events",data,id ? "PUT" : "POST");
   if (selected !== saved.id) { cancelTag(); resetForm($("participant-form")); } selected = saved.id; populate(form,saved);
@@ -366,7 +369,7 @@ $("event-form").onsubmit = action(async () => {
   try { preferences.setItem("foxlive.timezone",saved.timezone); } catch { /* Optional preference. */ }
 });
 $("new-event").onclick = newEvent;
-document.querySelectorAll("[data-state]").forEach(b => b.onclick = action(() => { if (['CLOSED','ARCHIVED'].includes(b.dataset.state)&&!confirm(t('event.confirm_state',{state:status('event',b.dataset.state)}))) return; return api(requireEvent()+"/state",{state:b.dataset.state}); }));
+document.querySelectorAll("[data-state]").forEach(b => b.onclick = action(() => { if (['CLOSED','ARCHIVED'].includes(b.dataset.state)&&!confirm(t('event.confirm_state',{state:status('event',b.dataset.state)}))) return; const reviews=b.dataset.state==='CLOSED' && snapshot.reviews.length; if(reviews && !confirm(t('review.confirm_close',{count:reviews}))) return; return api(requireEvent()+"/state",{state:b.dataset.state,confirm_reviews:Boolean(reviews)}); }));
 $("recalculate").onclick = action(async () => { const counts = await api(requireEvent()+"/recalculate",{}); importSummary = {recalculation:counts}; renderImport(); });
 $("category-form").onsubmit = action(async () => {
   const form = $("category-form"), id = form.dataset.entityId;
@@ -532,7 +535,7 @@ async function showDetail(id) {
   if (event !== selected || detailId !== id) return;
   const category = snapshot.categories.find(c => c.id === p.category_id);
   $("detail-body").innerHTML = `<p>#${p.start_number} ${escape(p.first_name)} ${escape(p.last_name)} · ${escape(p.club)} · ${escape(categoryLabel(category))} · ${escape(p.uid || t("rfid.none"))} · ${escape(status("participant",r.status))} · ${escape(t("ranking.controls"))}: ${r.controls}</p><p>${escape(t("time.start"))}: ${escape(time(r.start))} · ${escape(t("time.finish"))}: ${escape(time(r.finish))} · ${escape(t("time.elapsed"))}: ${duration(r.elapsed)}</p>` +
-    table(["time.local","station.label","punch.status","history.reason","punch.signal"],data.history.map(v => row([escape(time(v.station_timestamp)),escape(stationName(v)),escape(status("punch",v.status)),escape(v.reason === "Predefined start remains authoritative" ? t("punch.predefined_reason") : v.reason),escape(v.rssi)])));
+    table(["time.local","station.label","punch.status","history.reason","punch.signal"],data.history.map(v => row([escape(time(v.station_timestamp)),escape(stationName(v)),escape(status("punch",v.status)),escape(v.reason === "Predefined start remains authoritative" ? t("punch.predefined_reason") : v.reason),escape(v.rssi)]))) + (window.FoxLiveEvidence?.detail(data) || '');
 }
 $("close-detail").onclick = () => { detailId = null; $("detail").close(); };
 $('detail').addEventListener('cancel',()=>{detailId=null;});

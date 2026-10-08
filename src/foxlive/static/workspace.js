@@ -2,7 +2,7 @@
 window.FoxLiveWorkspace = class {
   constructor({text,eventChanged,preferences}) {
     Object.assign(this,{text,eventChanged,preferences,event:null,view:'overview'});
-    this.groups = {event:['overview','participants','categories','stations','live','rankings'],master:['runners','clubs','master-categories'],system:['base','diagnostics','settings']};
+    this.groups = {event:['overview','participants','categories','stations','live','readout','reviews','rankings'],master:['runners','clubs','master-categories'],system:['base','diagnostics','settings']};
     document.addEventListener('click',event => { const link=event.target.closest('[data-view-link]'); if (link && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.button===0) { event.preventDefault(); this.go(link.dataset.viewLink); } });
     window.addEventListener('popstate',() => this.read());
   }

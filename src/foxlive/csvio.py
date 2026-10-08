@@ -265,6 +265,11 @@ def export(service: LiveService, event_id: int, results: bool = False) -> str:
                 "start_time",
                 "finish_time",
                 "elapsed_time",
+                "completeness",
+                "provenance",
+                "recovered_controls",
+                "open_reviews",
+                "manual_decision",
             ]
         )
         for result in DistinctControlsThenTime().calculate(service.repo.results(event_id)):
@@ -294,6 +299,11 @@ def export(service: LiveService, event_id: int, results: bool = False) -> str:
                         start,
                         finish,
                         result.elapsed if result.elapsed is not None else "",
+                        result.completeness,
+                        result.provenance,
+                        result.recovered_controls,
+                        result.open_reviews,
+                        result.manual_decision,
                     ]
                 ]
             )

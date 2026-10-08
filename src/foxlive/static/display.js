@@ -44,7 +44,7 @@ function render() {
       section.append(table(["ranking.rank","participant.label","ranking.controls","time.elapsed","participant.status"],rows.map(r=>{
         const p=participants.get(r.participant_id);
         const running=r.status==="RUNNING" && r.start!=null;
-        return [r.rank, p ? `#${p.start_number} ${p.first_name} ${p.last_name}` : "—",r.controls,elapsed(running ? Math.max(0,Math.floor(Date.now()/1000)-r.start) : r.elapsed),t("participant."+r.status)];
+        return [r.rank, p ? `#${p.start_number} ${p.first_name} ${p.last_name}` : "—",r.controls,elapsed(running ? Math.max(0,Math.floor(Date.now()/1000)-r.start) : r.elapsed),t("participant."+r.status)+(r.completeness==='REVIEW_REQUIRED'?' · '+t('evidence.REVIEW_REQUIRED'):'')];
       })));
     }
     if (!results.length) section.append(table([],[]));

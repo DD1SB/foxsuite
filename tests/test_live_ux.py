@@ -85,7 +85,7 @@ def test_form_ids_generated_categories_and_native_controls(tmp_path: Path) -> No
         assert "Start number" in html and ">Bib<" not in html
         assert 'name="id"' not in html and "Category ID" not in html
         assert 'name="punch_ids"' not in html
-        assert html.count('type="datetime-local"') == 4
+        assert html.count('type="datetime-local"') == 5  # M5 adds explicit manual evidence time.
         assert 'type="date"' in html and "Local ISO time" not in html
         event, category, _ = configure(client)
         other = request(

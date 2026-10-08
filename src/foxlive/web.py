@@ -30,6 +30,7 @@ from foxcore.timesync import TimeSyncService
 
 from . import csvio, presentation, views
 from .config import LiveConfig
+from .evidence import DecisionInput, ReadoutInput, StatusDecisionInput
 from .lookup import club_matches, runner_matches
 from .models import (
     Category,
@@ -52,6 +53,7 @@ from .models import (
     StationData,
 )
 from .persistence import LiveRepository
+from .readout import capture, station_record
 from .service import LiveService
 
 log = SafeLogger(__name__)
@@ -59,6 +61,18 @@ log = SafeLogger(__name__)
 
 class LifecycleInput(Model):
     state: State
+    confirm_reviews: bool = False
+
+
+class SimulationRecord(Model):
+    file_id: int = Field(ge=0, le=255)
+    timestamp: str
+
+
+class SimulationInput(Model):
+    uid: str
+    records: list[SimulationRecord] = Field(max_length=256)
+    scenario: str = "valid"
 
 
 class ExclusionInput(Model):
@@ -232,7 +246,7 @@ def create_app(
     # No Swagger CDN dependencies: use the typed /openapi.json directly if needed.
     app = FastAPI(
         title="FoxLive",
-        version="0.3.0",
+        version="0.5.0",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -417,7 +431,120 @@ def create_app(
 
     @app.post("/api/events/{event_id}/state", response_model=Event)
     async def lifecycle(event_id: int, data: LifecycleInput) -> Event:
-        return current().live.transition(event_id, data.state)
+        return current().live.transition(event_id, data.state, data.confirm_reviews)
+
+    @app.post("/api/events/{event_id}/readouts/import")
+    async def import_readout(event_id: int, data: ReadoutInput) -> dict[str, Any]:
+        return current().live.evidence.import_raw(event_id, data.raw(), "browser-import")
+
+    @app.post("/api/events/{event_id}/readouts/simulate")
+    async def simulate_readout(event_id: int, data: SimulationInput) -> dict[str, Any]:
+        from foxcore.protocol import normalize_uid
+
+        from .models import instant, unix
+
+        event = current().live.repo.event(event_id)
+        uid = normalize_uid(data.uid)
+        if event.tag_event_id is None:
+            raise ValueError("Configure the event tag ID before simulating a readout")
+        if data.scenario not in {
+            "valid",
+            "empty",
+            "wrong_event",
+            "unsynchronized",
+            "malformed",
+            "partial",
+            "aborted",
+            "failed",
+        }:
+            raise ValueError("Unsupported readout scenario")
+        records = []
+        for record in data.records:
+            stamp = unix(instant(record.timestamp, event.timezone))
+            if stamp is None or not 0 <= stamp <= 4294967295:
+                raise ValueError("Manual time fails event timestamp validation")
+            records.append(
+                station_record(
+                    record.file_id,
+                    stamp,
+                    (event.tag_event_id + (data.scenario == "wrong_event")) % 65536,
+                    data.scenario != "unsynchronized",
+                )
+            )
+        if data.scenario == "empty":
+            records = []
+        if data.scenario == "malformed" and records:
+            records[0]["data"] = "FF"
+        status = (
+            data.scenario.upper()
+            if data.scenario in {"partial", "aborted", "failed"}
+            else "COMPLETE"
+        )
+        return current().live.evidence.import_raw(
+            event_id, capture(uid, records, status), "simulator"
+        )
+
+    @app.get("/api/events/{event_id}/readouts")
+    async def readouts(event_id: int) -> list[dict[str, Any]]:
+        current().live.repo.event(event_id)
+        return current().live.evidence.sessions(event_id)
+
+    @app.get("/api/events/{event_id}/readouts/{session_id}")
+    async def readout_detail(event_id: int, session_id: int) -> dict[str, Any]:
+        session = current().live.evidence.session(session_id)
+        if session["event_id"] != event_id:
+            raise ValueError("Readout does not exist")
+        return session
+
+    @app.get("/api/events/{event_id}/evidence")
+    async def evidence(event_id: int, participant_id: int | None = None) -> dict[str, Any]:
+        current().live.repo.event(event_id)
+        service = current().live.evidence
+        return {
+            "resolutions": [
+                r.model_dump(mode="json") for r in service.resolutions(event_id, participant_id)
+            ],
+            "decisions": service.decisions(event_id),
+        }
+
+    @app.get("/api/events/{event_id}/reviews")
+    async def reviews(event_id: int, include_resolved: bool = False) -> list[dict[str, Any]]:
+        current().live.repo.event(event_id)
+        return current().live.evidence.reviews(event_id, include_resolved)
+
+    @app.post("/api/events/{event_id}/decisions")
+    async def adjudicate(event_id: int, data: DecisionInput) -> dict[str, Any]:
+        return current().live.evidence.decide(event_id, data)
+
+    @app.post("/api/events/{event_id}/participants/{participant_id}/status")
+    async def status_ruling(
+        event_id: int, participant_id: int, data: StatusDecisionInput
+    ) -> dict[str, bool]:
+        current().live.evidence.set_status(event_id, participant_id, data)
+        return {"saved": True}
+
+    @app.get("/api/events/{event_id}/export/evidence")
+    async def export_evidence(event_id: int) -> Response:
+        service = current().live.evidence
+        current().live.repo.event(event_id)
+        document = {
+            "version": 1,
+            "event": current().live.repo.event(event_id).model_dump(mode="json"),
+            "readouts": [
+                service.session(row[0])
+                for row in service.db.execute(
+                    "SELECT id FROM tag_readout_sessions WHERE event_id=? ORDER BY id", (event_id,)
+                ).fetchall()
+            ],
+            "resolutions": [r.model_dump(mode="json") for r in service.resolutions(event_id)],
+            "decisions": service.decisions(event_id),
+            "audit": current().live.repo.audit(event_id),
+        }
+        return Response(
+            json.dumps(document, ensure_ascii=False, indent=2),
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="evidence.json"'},
+        )
 
     @app.post("/api/events/{event_id}/recalculate")
     async def recalculate(event_id: int) -> dict[str, int]:
@@ -514,6 +641,15 @@ def create_app(
             "participant": entry.model_dump(mode="json"),
             "result": result.model_dump(mode="json"),
             "history": list(reversed(service.repo.recent(event_id, 100000, participant_id))),
+            "evidence": [
+                r.model_dump(mode="json")
+                for r in service.evidence.resolutions(event_id, participant_id)
+            ],
+            "decisions": [
+                d
+                for d in service.evidence.decisions(event_id)
+                if d["participant_id"] == participant_id
+            ],
         }
 
     @app.get("/api/stations")
