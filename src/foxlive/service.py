@@ -60,7 +60,14 @@ class LiveService:
         return event
 
     def _audit(
-        self, event_id: int, action: str, entity: str, before: Any, after: Any, reason: str = ""
+        self,
+        event_id: int,
+        action: str,
+        entity: str,
+        before: Any,
+        after: Any,
+        reason: str = "",
+        operator: str | None = None,
     ) -> None:
         if self.repo.event(event_id).state == State.CLOSED:
             action = "after_close:" + action
@@ -70,7 +77,7 @@ class LiveService:
             (
                 event_id,
                 timestamp(),
-                self.operator,
+                operator or self.operator,
                 action,
                 entity,
                 json.dumps(before, sort_keys=True),
@@ -755,8 +762,9 @@ class LiveService:
         reviews = self.evidence.reviews(event_id)
         evidence_counts = self.repo.db.execute(
             "SELECT (SELECT COUNT(*) FROM tag_readout_sessions WHERE event_id=?),"
-            "(SELECT COUNT(*) FROM live_evidence_decisions WHERE event_id=?)",
-            (event_id, event_id),
+            "(SELECT COUNT(*) FROM live_evidence_decisions WHERE event_id=?) + "
+            "(SELECT COUNT(*) FROM live_audit_events WHERE event_id=? AND action IN ('status_adjudication','after_close:status_adjudication'))",
+            (event_id, event_id, event_id),
         ).fetchone()
         return base | {
             "event": event.model_dump(mode="json"),

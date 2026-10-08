@@ -135,6 +135,7 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "CREATE TRIGGER tag_record_no_update BEFORE UPDATE ON tag_readout_records BEGIN SELECT RAISE(ABORT,'Tag records are immutable'); END",
         "CREATE TRIGGER tag_record_no_delete BEFORE DELETE ON tag_readout_records BEGIN SELECT RAISE(ABORT,'Tag records are immutable'); END",
         "CREATE TRIGGER tag_session_no_update BEFORE UPDATE ON tag_readout_sessions WHEN OLD.status<>'PENDING' BEGIN SELECT RAISE(ABORT,'Tag sessions are immutable'); END",
+        "CREATE TRIGGER tag_capture_no_rewrite BEFORE UPDATE OF raw_payload,event_id,provider,received_at ON tag_readout_sessions BEGIN SELECT RAISE(ABORT,'Raw captures are immutable'); END",
         "CREATE TRIGGER tag_session_no_delete BEFORE DELETE ON tag_readout_sessions BEGIN SELECT RAISE(ABORT,'Tag sessions are immutable'); END",
         "CREATE TRIGGER evidence_decision_no_update BEFORE UPDATE ON live_evidence_decisions BEGIN SELECT RAISE(ABORT,'Decisions are append-only'); END",
         "CREATE TRIGGER evidence_decision_no_delete BEFORE DELETE ON live_evidence_decisions BEGIN SELECT RAISE(ABORT,'Decisions are append-only'); END",

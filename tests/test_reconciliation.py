@@ -281,3 +281,275 @@ def test_close_warns_open_cases_and_archive_blocks_import(tmp_path: Path) -> Non
     with pytest.raises(ValueError, match="read-only"):
         import_tag(live, event, [])
     store.close()
+
+
+def test_tag_event_unknown_then_configuration_reinterprets(tmp_path: Path) -> None:
+    store, live, _, event, _ = setup(tmp_path / "unknown_event.db", Timing.PREDEFINED_START)
+    import_tag(live, event, [station_record(1, STAMP + 10, 1825)])
+    assert live.repo.results(event)[0].controls == 0
+    assert live.evidence.resolutions(event)[0].status == "EVENT_ID_UNKNOWN"
+    data = live.repo.event(event).model_dump(include=set(EventData.model_fields))
+    live.put_event(EventData.model_validate(data | {"tag_event_id": 1825}), event)
+    assert live.repo.results(event)[0].controls == 1 and not live.evidence.reviews(event)
+    store.close()
+
+
+def test_excluded_live_match_requires_review_not_silent_revival(tmp_path: Path) -> None:
+    store, live, event, participant = configured(tmp_path)
+    from foxcore.service import IngestService
+
+    ingest = IngestService(store)
+    ingest.subscribe(live.accept)
+    source = punch(ingest, 1, 10)
+    live.exclude(event, source, "marshal dispute")
+    import_tag(live, event, [station_record(1, STAMP + 10, 1825)])
+    resolution = live.evidence.resolutions(event)[0]
+    assert "EXCLUDED_LIVE_MATCH" in resolution.issues and resolution.needs_review
+    assert live.repo.results(event)[0].controls == 0
+    tag = next(e for e in resolution.evidence if e.source_type == "TAG_READOUT")
+    decision(
+        live, event, participant, 1, "SELECT", source_type="TAG_READOUT", source_id=tag.source_id
+    )
+    assert live.repo.results(event)[0].controls == 1
+    assert live.repo.exclusions(event)[source] == "marshal dispute"
+    store.close()
+
+
+def test_source_retry_does_not_invalidate_a_ruling(tmp_path: Path) -> None:
+    store, live, event, participant = configured(tmp_path)
+    from foxcore.service import IngestService
+
+    ingest = IngestService(store)
+    ingest.subscribe(live.accept)
+    source = punch(ingest, 1, 10)
+    import_tag(live, event, [station_record(1, STAMP + 20, 1825)])
+    decision(live, event, participant, 1, "SELECT", source_type="LIVE", source_id=source)
+    retry = punch(ingest, 1, 10)
+    assert store.get_punch(retry).duplicate and live.repo.results(event)[0].controls == 1
+    assert not live.evidence.reviews(event)
+    store.close()
+
+
+def test_window_and_disabled_station_do_not_count_tag(tmp_path: Path) -> None:
+    store, live, event, _ = configured(tmp_path)
+    data = live.repo.event(event).model_dump(include=set(EventData.model_fields))
+    live.put_event(
+        EventData.model_validate(
+            data | {"competition_end_at": datetime.fromtimestamp(STAMP + 10, UTC).isoformat()}
+        ),
+        event,
+    )
+    from foxlive.models import Role, StationData
+
+    live.put_station(
+        event,
+        StationData(station_id=2, display_name="Disabled fox", role=Role.CONTROL, enabled=False),
+    )
+    import_tag(
+        live, event, [station_record(1, STAMP + 11, 1825), station_record(2, STAMP + 5, 1825)]
+    )
+    assert live.repo.results(event)[0].controls == 0
+    assert {r.status for r in live.evidence.resolutions(event)} == {
+        "OUTSIDE_EVENT_WINDOW",
+        "DISABLED_STATION",
+    }
+    store.close()
+
+
+@pytest.mark.parametrize("status", ["PARTIAL", "FAILED", "ABORTED"])
+def test_incomplete_read_absence_never_invalidates_live(tmp_path: Path, status: str) -> None:
+    store, live, event, _ = configured(tmp_path)
+    from foxcore.service import IngestService
+
+    ingest = IngestService(store)
+    ingest.subscribe(live.accept)
+    punch(ingest, 1, 10)
+    import_tag(live, event, [], status=status)
+    assert live.repo.results(event)[0].controls == 1
+    assert live.repo.results(event)[0].completeness == "REVIEW_REQUIRED"
+    assert live.evidence.reviews(event)
+    store.close()
+
+
+def test_tag_whole_second_ties_and_midnight_dst_absolute_times(tmp_path: Path) -> None:
+    store, live, event, _ = configured(tmp_path, Timing.PUNCH_START_FINISH)
+    import_tag(
+        live,
+        event,
+        [
+            station_record(1, STAMP, 1825),
+            station_record(10, STAMP, 1825),
+            station_record(11, STAMP, 1825),
+        ],
+    )
+    assert live.repo.results(event)[0].controls == 1 and live.repo.results(event)[0].elapsed == 0
+    start = int(datetime(2026, 10, 24, 23, 30, tzinfo=UTC).timestamp())
+    finish = int(datetime(2026, 10, 25, 2, 30, tzinfo=UTC).timestamp())
+    # Europe's fall-back happens inside the race; elapsed is absolute, not wall-clock subtraction.
+    live.evidence.import_raw(
+        event,
+        capture(
+            UID,
+            [
+                station_record(10, start, 1825),
+                station_record(1, start + 10, 1825),
+                station_record(11, finish, 1825),
+            ],
+        ),
+        received_at=datetime.fromtimestamp(finish + 60, UTC),
+    )
+    assert live.repo.results(event)[0].elapsed == 10800
+    store.close()
+
+
+def test_raw_first_survives_parser_and_recalculation_failures(tmp_path: Path) -> None:
+    store, live, event, _ = configured(tmp_path)
+    raw = capture(UID, [station_record(1, STAMP + 10, 1825)])
+    with patch("foxlive.evidence.parse_readout", side_effect=RuntimeError("parser failure")):
+        with pytest.raises(RuntimeError):
+            live.evidence.import_raw(event, raw)
+    row = store.db.execute("SELECT * FROM tag_readout_sessions").fetchone()
+    assert bytes(row["raw_payload"]) == raw and row["status"] == "PENDING"
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        store.db.execute("UPDATE tag_readout_sessions SET raw_payload=?", (b"rewrite",))
+    live.recover()
+    assert live.repo.results(event)[0].controls == 1
+    with patch.object(live, "_calculate", side_effect=RuntimeError("scorer failure")):
+        with pytest.raises(RuntimeError):
+            import_tag(live, event, [station_record(2, STAMP + 20, 1825)])
+    assert store.db.execute("SELECT COUNT(*) FROM tag_readout_records").fetchone()[0] == 2
+    live.recalculate(event)
+    assert live.repo.results(event)[0].controls == 2
+    store.close()
+
+
+def test_semantically_identical_capture_keeps_tag_ruling(tmp_path: Path) -> None:
+    store, live, event, participant = configured(tmp_path)
+    item = station_record(1, STAMP + 10, 1825)
+    import_tag(live, event, [item])
+    tag = live.evidence.resolutions(event)[0].accepted[0]
+    decision(
+        live, event, participant, 1, "SELECT", source_type="TAG_READOUT", source_id=tag.source_id
+    )
+    item["data"] = " ".join(str(item["data"]).lower()[i : i + 2] for i in range(0, 16, 2))
+    import_tag(live, event, [item])
+    assert not live.evidence.reviews(event) and live.repo.results(event)[0].controls == 1
+    store.close()
+
+
+def test_reason_required_future_clock_and_manual_time_ruling(tmp_path: Path) -> None:
+    store, live, event, participant = configured(tmp_path)
+    with pytest.raises(ValueError, match="requires a reason"):
+        live.evidence.decide(
+            event,
+            DecisionInput(participant_id=participant, station_id=1, action="EXCLUDE", reason="  "),
+        )
+    future = int(datetime(2030, 1, 1, tzinfo=UTC).timestamp())
+    live.evidence.import_raw(
+        event,
+        capture(UID, [station_record(1, future, 1825)]),
+        received_at=datetime.fromtimestamp(STAMP, UTC),
+    )
+    assert live.repo.results(event)[0].controls == 0
+    decision(
+        live,
+        event,
+        participant,
+        11,
+        "MANUAL",
+        timestamp=datetime.fromtimestamp(STAMP + 90, UTC).isoformat(),
+    )
+    assert live.repo.results(event)[0].elapsed == 90
+    store.close()
+
+
+def test_software_acceptance_five_foxes_recovery_ranking_review_restart(tmp_path: Path) -> None:
+    from foxcore.service import IngestService
+    from foxlive.models import EntryData, Role, RunnerData, StationData
+
+    store, live, event, participant = configured(tmp_path)
+    for station in (3, 4, 5):
+        live.put_station(
+            event, StationData(station_id=station, display_name=f"Fox {station}", role=Role.CONTROL)
+        )
+    category = live.repo.entries(event)[0].category_id
+    runner = live.put_runner(RunnerData(first_name="Anna", last_name="Example", birth_year=1985))
+    other_uid = "04AABBCCDDEE11"
+    other = live.put_entry(
+        event, EntryData(runner_id=runner.id, start_number=18, category_id=category, uid=other_uid)
+    )
+    ingest = IngestService(store)
+    ingest.subscribe(live.accept)
+    source_ids = {station: punch(ingest, station, station * 10, station) for station in (1, 3, 5)}
+    punch(ingest, 11, 100, 6)
+    for station in (1, 2, 3, 4):
+        punch(ingest, station, station * 10, station + 10, other_uid)
+    punch(ingest, 11, 90, 20, other_uid)
+    assert {r.participant_id: r.rank for r in live.repo.results(event)} == {
+        participant: 2,
+        other.id: 1,
+    }
+    original = [tuple(r) for r in store.db.execute("SELECT * FROM punches ORDER BY id")]
+    readout = import_tag(
+        live,
+        event,
+        [station_record(station, STAMP + station * 10, 1825) for station in range(1, 6)],
+    )
+    assert readout["summary"]["recovered"] == 2 and readout["summary"]["matches"] == 3
+    assert {r.participant_id: r.rank for r in live.repo.results(event)} == {
+        participant: 1,
+        other.id: 2,
+    }
+    assert (
+        next(r for r in live.repo.results(event) if r.participant_id == participant).controls == 5
+    )
+    import_tag(live, event, [station_record(3, STAMP + 35, 1825)])
+    assert len(live.evidence.reviews(event)) == 1
+    decision(live, event, participant, 3, "SELECT", source_type="LIVE", source_id=source_ids[3])
+    assert not live.evidence.reviews(event)
+    assert any(a["action"] == "adjudication" and a["reason"] for a in live.repo.audit(event))
+    final = live.snapshot(event)["results"]
+    assert [tuple(r) for r in store.db.execute("SELECT * FROM punches ORDER BY id")] == original
+    store.close()
+    store = Store(tmp_path / "evidence.db")
+    live = LiveService(LiveRepository(store))
+    live.recover()
+    assert live.snapshot(event)["results"] == final
+    store.close()
+
+
+def test_equal_numeric_unsynchronized_live_and_tag_time_is_not_validated_by_match(
+    tmp_path: Path,
+) -> None:
+    from foxcore.service import IngestService
+
+    store, live, event, _ = configured(tmp_path, Timing.PUNCH_START_FINISH)
+    ingest = IngestService(store)
+    ingest.subscribe(live.accept)
+    start = punch(ingest, 10, 0)
+    punch(ingest, 1, 10, 2)
+    punch(ingest, 11, 60, 3)
+    assert live.repo.results(event)[0].elapsed == 60
+    import_tag(live, event, [station_record(10, STAMP, 1825, False)])
+    assert live.repo.results(event)[0].elapsed is None
+    assert live.evidence.reviews(event)
+    assert store.get_punch(start).station_timestamp == STAMP
+    live_evidence = live.evidence.resolutions(event)[1].evidence[0]
+    assert live_evidence.validity == "UNTRUSTED_LIVE_TIME"
+    store.close()
+
+
+def test_display_metadata_does_not_revoke_jury_ruling(tmp_path: Path) -> None:
+    from foxlive.models import EventData, Role, StationData
+
+    store, live, event, participant = configured(tmp_path)
+    import_tag(live, event, [station_record(1, STAMP + 10, 99)])
+    decision(live, event, participant, 1, "PRESENCE")
+    data = live.repo.event(event).model_dump(include=set(EventData.model_fields))
+    live.put_event(EventData.model_validate(data | {"name": "Corrected spelling"}), event)
+    live.put_station(
+        event, StationData(station_id=1, display_name="Renamed fox", role=Role.CONTROL)
+    )
+    assert live.repo.results(event)[0].controls == 1
+    assert not live.evidence.reviews(event)
+    store.close()

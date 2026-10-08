@@ -40,7 +40,7 @@ class ScoringObservation(Protocol):
     @property
     def station_timestamp(self) -> int: ...
     @property
-    def received_at_pc(self) -> datetime: ...
+    def received_at_pc(self) -> datetime | None: ...
     @property
     def duplicate(self) -> bool: ...
 
@@ -118,9 +118,9 @@ def interpret(
             status = IS.SOURCE_DUPLICATE
         elif punch.id in exclusions:
             status, reason = IS.MANUALLY_EXCLUDED, exclusions[punch.id]
-        elif (
-            not event.minimum_unix_timestamp <= time <= 4294967295
-            or abs(time - punch.received_at_pc.timestamp()) > event.maximum_receive_skew_seconds
+        elif not event.minimum_unix_timestamp <= time <= 4294967295 or (
+            punch.received_at_pc is not None
+            and abs(time - punch.received_at_pc.timestamp()) > event.maximum_receive_skew_seconds
         ):
             status = IS.INVALID_TIMESTAMP
         elif (window_start is not None and time < window_start) or (

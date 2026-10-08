@@ -3,7 +3,7 @@
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from pydantic import Field
 
@@ -18,6 +18,7 @@ class Evidence(Model):
     session_id: int | None = None
     tag_event_id: int | None = None
     time_synchronized: bool | None = None
+    received_at_pc: str | None = None
 
 
 class Resolution(Model):
@@ -44,7 +45,7 @@ class Observation:
     uid: str
     station_id: int
     station_timestamp: int
-    received_at_pc: datetime
+    received_at_pc: datetime | None
     duplicate: bool = False
 
 
@@ -77,8 +78,17 @@ def resolve(
     evidence: list[Evidence],
     source_fingerprint: str,
 ) -> Resolution:
-    live = [e for e in evidence if e.source_type == "LIVE" and e.validity == "VALID"]
     tag = next((e for e in evidence if e.source_type == "TAG_READOUT"), None)
+    if tag is not None and tag.validity == "UNSYNC_TAG_TIME":
+        evidence = [
+            e.model_copy(update={"validity": "UNTRUSTED_LIVE_TIME"})
+            if e.source_type == "LIVE"
+            and e.validity == "VALID"
+            and e.station_timestamp == tag.station_timestamp
+            else e
+            for e in evidence
+        ]
+    live = [e for e in evidence if e.source_type == "LIVE" and e.validity == "VALID"]
     issues = sorted(
         {
             e.validity
@@ -106,6 +116,12 @@ def resolve(
         result.issues.append(result.status)
         result.accepted = []
     elif tag is not None and tag.validity == "VALID":
+        excluded = any(
+            e.source_type == "LIVE"
+            and e.validity == "MANUALLY_EXCLUDED"
+            and e.station_timestamp == tag.station_timestamp
+            for e in evidence
+        )
         matches = [e for e in live if e.station_timestamp == tag.station_timestamp]
         if matches:
             result.status = "MATCHED" if len(live) == 1 else "TAG_CONFIRMED_LIVE"
@@ -117,6 +133,9 @@ def resolve(
             result.issues.append("CONFLICT")
             if role in {Role.START, Role.FINISH}:
                 result.accepted = []
+        if excluded:
+            result.issues.append("EXCLUDED_LIVE_MATCH")
+            result.accepted = live
     elif not live:
         result.status = tag.validity if tag else "EXCLUDED"
     # LIVE invalid/duplicates alone retain M3 behavior without generating a new review queue.
@@ -126,15 +145,24 @@ def resolve(
 
 def observation(evidence: Evidence, resolution: Resolution) -> Observation:
     assert evidence.station_timestamp is not None
+    role_order = {Role.START: 0, Role.CONTROL: 1, Role.FINISH: 2}.get(
+        resolution.role or Role.CONTROL, 1
+    )
+    # Private, non-persisted sort keys: whole-second offline ties process START,
+    # CONTROL, FINISH in that order. Wide bands cannot collide with SQLite IDs;
+    # all-live ties still use the original source-ID order as in M3.
     key = (
         evidence.source_id
         if evidence.source_type == "LIVE"
-        else -2 * evidence.source_id - (evidence.source_type == "TAG_READOUT")
+        else -(1 << 66)
+        + role_order * (1 << 64)
+        + 2 * evidence.source_id
+        + (evidence.source_type == "TAG_READOUT")
     )
     return Observation(
         int(key),
         resolution.uid,
         resolution.station_id,
         evidence.station_timestamp,
-        datetime.fromtimestamp(evidence.station_timestamp, UTC),
+        datetime.fromisoformat(evidence.received_at_pc) if evidence.received_at_pc else None,
     )

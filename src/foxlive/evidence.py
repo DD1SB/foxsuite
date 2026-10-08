@@ -1,13 +1,14 @@
 """Owner-loop persistence and adjudication of independent tag/manual evidence."""
 
+import base64
 import json
 from collections import defaultdict
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
-from .models import Calculation, Entry, Model, Role, instant, unix
+from .models import Calculation, CompetitionStatus, Entry, Event, Model, Role, instant, unix
 from .persistence import timestamp
 from .readout import TagReadout, parse_readout
 from .reconciliation import Evidence, Resolution, fingerprint, observation, resolve, time_validity
@@ -29,7 +30,24 @@ class DecisionInput(Model):
 
 
 class ReadoutInput(Model):
-    payload: str = Field(max_length=1_048_576)
+    payload: str | None = Field(default=None, max_length=1_048_576)
+    raw_base64: str | None = Field(default=None, max_length=1_398_104)
+
+    def raw(self) -> bytes:
+        if (self.payload is None) == (self.raw_base64 is None):
+            raise ValueError("Provide exactly one readout capture")
+        if self.payload is not None:
+            return self.payload.encode("utf-8")
+        try:
+            return base64.b64decode(self.raw_base64 or "", validate=True)
+        except ValueError as exc:
+            raise ValueError("Invalid readout capture encoding") from exc
+
+
+class StatusDecisionInput(Model):
+    status: CompetitionStatus | None = None
+    reason: str = Field(min_length=1, max_length=1000)
+    operator: str = Field(default="", max_length=100)
 
 
 class EvidenceService:
@@ -37,6 +55,21 @@ class EvidenceService:
         self.live = live
         self.repo = live.repo
         self.db = live.repo.db
+
+    @staticmethod
+    def _timing_config(event: Event, entry: Entry | None) -> dict[str, Any]:
+        # A spelling/display change must not revoke an otherwise applicable jury ruling.
+        return event.model_dump(
+            include={
+                "timing_mode",
+                "competition_start_at",
+                "competition_end_at",
+                "default_start_at",
+                "minimum_unix_timestamp",
+                "maximum_receive_skew_seconds",
+                "tag_event_id",
+            }
+        ) | {"entry_start_time": entry.start_time if entry else None}
 
     def import_raw(
         self,
@@ -48,7 +81,9 @@ class EvidenceService:
         self.live.mutable(event_id)
         if len(raw) > 1_048_576:
             raise ValueError("Readout exceeds 1 MiB")
-        received = received_at.isoformat() if received_at else timestamp()
+        if received_at is not None and received_at.tzinfo is None:
+            raise ValueError("PC readout time must be timezone-aware")
+        received = received_at.astimezone(UTC).isoformat() if received_at else timestamp()
         # Raw capture commits independently of parsing and derived processing.
         with self.db:
             session = self.live._insert(
@@ -63,10 +98,20 @@ class EvidenceService:
             )
         readout = parse_readout(raw, provider, datetime.fromisoformat(received))
         self._finalize(session, readout)
-        self.live.recalculate(event_id)
-        self.live.publish(
-            "tag_readout_completed",
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            if readout.uid is not None:
+                self.live._calculate(event_id, readout.uid)
+            self.live._audit(
+                event_id,
+                "tag_readout",
+                str(session),
+                None,
+                {"uid": readout.uid, "status": readout.status, "provider": provider},
+            )
+        self.live.notify(
             event_id,
+            "tag_readout_completed",
             {"session_id": session, "uid": readout.uid, "status": readout.status},
         )
         return self.session(session)
@@ -111,7 +156,7 @@ class EvidenceService:
 
     def sessions(self, event_id: int, limit: int = 50) -> list[dict[str, Any]]:
         # Desk snapshots are bounded metadata, not repeated raw payload/record queries.
-        return [
+        result = [
             dict(r) | {"errors": json.loads(r["errors"])}
             for r in self.db.execute(
                 "SELECT s.id,s.event_id,s.received_at,s.provider,s.uid,s.reader,s.status,s.errors,e.id AS participant_id "
@@ -120,6 +165,13 @@ class EvidenceService:
                 (event_id, limit),
             )
         ]
+        if result:
+            grouped: dict[str, list[Resolution]] = defaultdict(list)
+            for resolution in self.resolutions(event_id):
+                grouped[resolution.uid].append(resolution)
+            for item in result:
+                item["summary"] = self._summary(grouped.get(item["uid"], []))
+        return result
 
     def session(self, session_id: int) -> dict[str, Any]:
         row = self.db.execute(
@@ -128,6 +180,9 @@ class EvidenceService:
         if row is None:
             raise ValueError("Readout does not exist")
         result = dict(row)
+        result["raw_payload_base64"] = base64.b64encode(bytes(result["raw_payload"])).decode(
+            "ascii"
+        )
         result["raw_payload"] = bytes(result["raw_payload"]).decode("utf-8", errors="replace")
         result["errors"] = json.loads(result["errors"])
         result["records"] = []
@@ -183,6 +238,9 @@ class EvidenceService:
 
     def summary(self, event_id: int, uid: str | None) -> dict[str, Any]:
         rows = [r for r in self.resolutions(event_id) if r.uid == uid]
+        return self._summary(rows)
+
+    def _summary(self, rows: list[Resolution]) -> dict[str, Any]:
         return {
             "live_controls": sum(
                 r.role == Role.CONTROL
@@ -229,12 +287,13 @@ class EvidenceService:
                     source_id=punch.id,
                     station_timestamp=punch.station_timestamp,
                     validity=validity,
+                    received_at_pc=punch.received_at_pc.isoformat(),
                 )
             )
         params: tuple[Any, ...] = (event_id,) if uid is None else (event_id, uid)
         filter_uid = "" if uid is None else " AND s.uid=?"
         records = self.db.execute(
-            "SELECT r.*,s.uid,s.status AS session_status FROM tag_readout_records r JOIN tag_readout_sessions s ON s.id=r.session_id WHERE s.event_id=? AND s.uid IS NOT NULL"
+            "SELECT r.*,s.uid,s.received_at,s.status AS session_status FROM tag_readout_records r JOIN tag_readout_sessions s ON s.id=r.session_id WHERE s.event_id=? AND s.uid IS NOT NULL"
             + filter_uid
             + " ORDER BY r.id",
             params,
@@ -256,6 +315,13 @@ class EvidenceService:
                     if not row["synchronized"]
                     else time_validity(event, row["station_timestamp"])
                 )
+                if (
+                    validity == "VALID"
+                    and row["station_timestamp"]
+                    > datetime.fromisoformat(row["received_at"]).timestamp()
+                    + event.maximum_receive_skew_seconds
+                ):
+                    validity = "INVALID_TIMESTAMP"
             groups[key].append(
                 Evidence(
                     source_type="TAG_READOUT",
@@ -306,12 +372,26 @@ class EvidenceService:
                     "uid": key_uid,
                     "station": station_id,
                     "entry": entry.id if entry else None,
-                    "event": event.model_dump(
-                        exclude={"updated_at", "created_at", "cursor", "state"}
-                    ),
-                    "station_config": station.model_dump() if station else None,
-                    "live": [e.model_dump() for e in items if e.source_type == "LIVE"],
-                    "tag": [file["raw_value"], file["session_status"]] if file else None,
+                    "event": self._timing_config(event, entry),
+                    "station_config": station.model_dump(include={"role", "enabled"})
+                    if station
+                    else None,
+                    "live": [
+                        e.model_dump()
+                        for e in items
+                        if e.source_type == "LIVE" and e.validity != "SOURCE_DUPLICATE"
+                    ],
+                    "tag": [
+                        (
+                            bytes(file["raw_bytes"]).hex()
+                            if file["raw_bytes"] is not None
+                            else file["raw_value"]
+                        ),
+                        file["parse_status"],
+                        file["session_status"],
+                    ]
+                    if file
+                    else None,
                     "session_status": session_state.get(key_uid) if station_id == -1 else None,
                 }
             )
@@ -324,6 +404,10 @@ class EvidenceService:
                 items,
                 signature,
             )
+            if station_id == -1:
+                resolution.status = "INCOMPLETE_READOUT"
+                resolution.issues = [i for i in resolution.issues if i != "UNKNOWN_STATION"]
+                resolution.needs_review = bool(items)
             decision = decisions.get((entry.id, station_id)) if entry else None
             if decision is not None and decision["action"] != "AUTO":
                 if decision["fingerprint"] == signature:
@@ -353,7 +437,24 @@ class EvidenceService:
                         "status": item.status.value,
                     }
                 )
+                if (
+                    accepted.source_type == "TAG_READOUT"
+                    and item.status.value == "INVALID_FOR_TIMING"
+                    and resolution.decision_id is None
+                ):
+                    resolution.issues.append("INVALID_FOR_TIMING")
+                    resolution.needs_review = True
             self._cache(event_id, resolution)
+        for previous in self.resolutions(event_id):
+            if (uid is None or previous.uid == uid) and (
+                previous.uid,
+                previous.station_id,
+            ) not in groups:
+                previous.needs_review = False
+                previous.accepted = []
+                previous.scored = []
+                previous.status = "SUPERSEDED"
+                self._cache(event_id, previous)
         for result in calculation.results:
             rows = [r for r in resolved if r.participant_id == result.participant_id]
             counted = {
@@ -365,6 +466,9 @@ class EvidenceService:
                     result.controls += 1
             result.open_reviews = sum(r.needs_review for r in rows)
             result.manual_decision = any(r.decision_id is not None for r in rows)
+            result.manual_decision |= any(
+                e.id == result.participant_id and e.manual_status is not None for e in entries
+            )
             result.recovered_controls = sum(
                 r.status == "TAG_ONLY_RECOVERED" and r.station_id in counted for r in rows
             )
@@ -476,10 +580,10 @@ class EvidenceService:
                     "uid": uid,
                     "station": data.station_id,
                     "entry": entry.id,
-                    "event": event.model_dump(
-                        exclude={"updated_at", "created_at", "cursor", "state"}
-                    ),
-                    "station_config": station.model_dump() if station else None,
+                    "event": self._timing_config(event, entry),
+                    "station_config": station.model_dump(include={"role", "enabled"})
+                    if station
+                    else None,
                     "live": [],
                     "tag": None,
                     "session_status": None,
@@ -497,6 +601,7 @@ class EvidenceService:
                         e
                         for e in current.evidence
                         if e.source_type == data.source_type
+                        and e.source_type in {"LIVE", "TAG_READOUT"}
                         and e.source_id == data.source_id
                         and e.validity == "VALID"
                     ),
@@ -532,10 +637,44 @@ class EvidenceService:
                 current.model_dump() if current else None,
                 data.model_dump() | {"decision_id": decision_id},
                 data.reason.strip(),
+                operator=data.operator.strip() or self.live.operator,
             )
             self.live._calculate(event_id)
         self.live.notify(event_id, "reconciliation_updated", {"decision_id": decision_id})
         return next(d for d in self.decisions(event_id) if d["id"] == decision_id)
+
+    def set_status(self, event_id: int, participant_id: int, data: StatusDecisionInput) -> None:
+        self.live.mutable(event_id)
+        if data.status not in {
+            None,
+            CompetitionStatus.DNS,
+            CompetitionStatus.DNF,
+            CompetitionStatus.DSQ,
+        }:
+            raise ValueError("Unsupported adjudication action")
+        if not data.reason.strip():
+            raise ValueError("Decision requires a reason")
+        entry = next((e for e in self.repo.entries(event_id) if e.id == participant_id), None)
+        if entry is None:
+            raise ValueError("Participant does not exist in this event")
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            self.live._put_entry(
+                event_id,
+                entry.registration().model_copy(update={"manual_status": data.status}),
+                entry.id,
+            )
+            self.live._audit(
+                event_id,
+                "status_adjudication",
+                str(entry.id),
+                entry.manual_status,
+                data.status,
+                data.reason.strip(),
+                operator=data.operator.strip() or self.live.operator,
+            )
+            self.live._calculate(event_id)
+        self.live.notify(event_id, "participant_updated", {"participant_id": entry.id})
 
     def publish_review_changes(self, event_id: int, before: dict[int, str]) -> None:
         for review in self.reviews(event_id, True):

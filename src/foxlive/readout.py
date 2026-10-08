@@ -76,7 +76,7 @@ def parse_readout(
     try:
         if len(raw) > 1_048_576:
             raise ValueError("Readout exceeds 1 MiB")
-        data = json.loads(raw)
+        data = json.loads(raw.decode("utf-8"))
         if not isinstance(data, dict):
             raise ValueError("Readout must be an object")
         if (
@@ -145,6 +145,8 @@ def capture(uid: str, records: list[dict[str, Any]], status: str = "COMPLETE") -
 def station_record(
     station: int, stamp: int, event_id: int, synchronized: bool = True
 ) -> dict[str, Any]:
+    if not 0 <= station <= 255 or not 0 <= stamp <= 4294967295 or not 0 <= event_id <= 65535:
+        raise ValueError("Station, timestamp or tag event ID is out of range")
     return {
         "file_id": station,
         "data": struct.pack("<IHBB", stamp, event_id, 0, int(synchronized)).hex().upper(),
