@@ -1,4 +1,28 @@
-# FoxSuite architecture — M1, M2 and M3
+# FoxSuite architecture — M1 through M4
+
+## M4 desktop operations boundary
+
+`foxops` composes the accepted FoxLive HTTP lifespan and existing FoxCore transport/ingest/TimeSync.
+Its Start-menu launcher adds per-user paths, atomic settings, a process lock, setup/settings routes,
+device-enumeration metadata, backup/restore and controlled server restart. FoxCore, FoxBridge and
+the competition domain/scoring remain unchanged. No schema migration or second serial parser.
+
+The desktop controller owns one source task; probing/settings serialize with an asyncio lock.
+A probe pauses that task, uses the same raw-first pipeline, then resumes it. SQLite stays on the
+HTTP lifespan's owner loop. Online backup is synchronous on that owner to preserve thread affinity;
+large snapshots/compression can briefly delay HTTP/ingest while serial buffers provide backpressure.
+Restore/location changes queue a single operation, refuse further mutations, stop HTTP/source,
+close SQLite, perform validated filesystem work, then start a fresh lifespan. Connected desk/display
+clients use their existing reconnect behavior; no source history is re-emitted. No uncontrolled
+concurrent SQLite writer or cross-thread database connection is introduced.
+
+Host checks, same-origin mutation checks and CSP apply to operations too. Only the fixed archive
+upload endpoint permits binary POST; member names are validated without arbitrary ZIP extraction.
+The local trusted-PC/no-auth boundary remains. Settings paths are operator input, not a public file
+server. Desktop binding is localhost-only; advanced developer CLI LAN exposure remains explicitly
+unsecured. See [Windows operations](WINDOWS.md) for packaging, precedence and validation limits.
+
+## Accepted application boundaries
 
 `foxcore` owns serial, parsing, UID normalization, dedupe, persistence, replay and TimeSync.
 `foxbridge` is an event consumer and SPORTident live-output gateway, not competition software.

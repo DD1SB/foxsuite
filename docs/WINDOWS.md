@@ -27,6 +27,9 @@ serial number on a different port is **offered**, never automatically selected/o
 ambiguous USB identity needs manual selection. An open port and successful `TIME <unix>\n` write
 are not a firmware acknowledgement or proof of device identity. Test input uses FoxCore raw-first
 persistence in the current database, including malformed/debug lines.
+Port changes retain FoxCore's existing `serial:<port>` source/deduplication semantics. USB identity
+metadata helps selection, not LoRa packet identity; an old retry on a newly confirmed port may have
+a different source key. See the accepted bridge recovery/source warning in OPERATIONS.
 
 ## Data safety
 

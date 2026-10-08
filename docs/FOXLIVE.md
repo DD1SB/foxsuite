@@ -1,5 +1,13 @@
 # FoxLive — M3 domain and operational contract
 
+M4 desktop setup/settings surround this accepted application without changing its domain/scoring.
+Normal Windows launch uses the Start-menu FoxSuite shortcut; first-run setup selects language,
+USB/COM and data location. System → Settings opens graphical connection, backup/restore and safe
+shutdown. EN/DE remains browser-local presentation; a saved application preference initializes a
+fresh browser, never translates persisted competition data. Accepted M3 physical Windows
+registration/RFID/live/second-monitor/restart testing remains **pending** independently of packaging.
+See [Windows operations](WINDOWS.md) for installation/storage and its separate acceptance checklist.
+
 ## Event desk information architecture
 
 Event operations (overview, participants, category selection, stations, operator live and rankings)
@@ -523,7 +531,7 @@ freshness, bulk dashboard queries (201-entry query-count regression), HTML escap
 host/port/paths and concise operator errors. Core changes are limited to suite version, CLI composition
 and additive migration 3; accepted serial/parser/TimeSync/dedupe logic is untouched. The prior fixed
 schema-version assertion now checks the migration count without dropping its source-preservation test.
-M4 has not been started.
+At this initial M3 snapshot, M4 had not been started. Current M4 operations are documented in WINDOWS.md.
 
 ## M3 event-desk UX / information architecture gates — 2026-10-08
 
@@ -573,7 +581,7 @@ Browser tests are optional development checks: install `.[dev,ui-test]`, provisi
 testing. Normal runtime has no Playwright, Node/npm, CDN or browser-download requirement. Five pure
 JavaScript helper cases use Node.js when available without any npm dependencies; other regression
 checks require only the project's Python test dependencies. The upstream Starlette HTTPX warning
-remains visible and is not suppressed. M4 has not been started.
+remains visible and is not suppressed. At this UX snapshot, M4 had not been started.
 
 ## Focused M3 registration-domain correction — 2026-10-07
 
@@ -619,4 +627,4 @@ that created event-local person/category fields were updated to create reusable 
 categories; collision/reassignment/tie/import fixtures now use distinct people and birth information.
 Their timing, ranking, immutable-source and error-boundary assertions remain intact. Historical
 validation sections above describe earlier commits, not the current schema/registration contract.
-M4 has not been started.
+At this domain-model snapshot, M4 had not been started. Current M4 operations are documented in WINDOWS.md.

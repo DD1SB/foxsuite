@@ -2,6 +2,27 @@
 
 ## Windows installation
 
+The normal M4 path is the self-contained Windows installer and **FoxSuite** Start-menu shortcut.
+No Python, Git, PowerShell, pip or TOML editing is needed on the event PC. First launch opens the
+EN/DE setup wizard: select the described USB/COM port, test connection, accept the data folder,
+finish and use FoxLive. **System → Settings** opens graphical configuration, backups and safe
+shutdown. Browser/baud/reconnect/TimeSync interval/log detail are under Advanced. A test pauses the
+existing reader briefly and retains all received bytes using FoxCore. Write success does not prove
+firmware identity or acknowledgement. A saved USB VID/PID/serial on a changed COM port is offered
+for confirmation; missing/ambiguous identity pauses reception until corrected. Without reliable
+USB identity the explicitly chosen port remains the reconnect target.
+
+Normal data is `%LOCALAPPDATA%\FoxSuite\data\foxsuite.db`; settings are in
+`config\settings.toml`, rotating logs in `logs`, backups in `backups` below the same user root.
+Installation is separately `%LOCALAPPDATA%\Programs\FoxSuite`. Upgrades/uninstall do not remove
+competition data. Paths are absolute and independent of the Start-menu working directory.
+Closing a browser does **not** stop the application; use **Settings → Shut down FoxSuite**.
+M4 Windows release-build/clean-machine validation remains pending; build recipes and the exact
+acceptance checklist are in [Windows operations](WINDOWS.md). M3 physical acceptance also remains
+pending. No new hardware acceptance is claimed by Linux tests.
+
+### Advanced/developer installation (unchanged)
+
 Install Python 3.12+ and run in PowerShell from the repository:
 
 ```powershell
@@ -162,6 +183,37 @@ infer a source identity that the firmware does not provide. A new target or data
 new delivery identities; neither is a safe workaround for uncertain writes.
 
 ## Recovery, troubleshooting and shutdown
+
+### Graphical backup/restore and data-folder changes
+
+In desktop **Settings**, create a backup, download it to another disk/USB, or import a `.foxbackup`
+file and explicitly restore it. Archives contain an online SQLite snapshot (including committed WAL
+data), settings snapshot, manifest and SHA-256 checksums. Import/restore reject unsupported/corrupt
+databases, invalid archive members and checksums. Browser import is limited to 512 MiB compressed,
+8 GiB total uncompressed contents. Backups include all core/bridge/live data, mappings, history and
+audit; these are whole-database backups, not single-event exports. No cloud or automatic pruning.
+Restore preserves this machine's current serial/HTTP settings and makes a safety backup first.
+Only restore backups you trust; checksums detect corruption, not malicious provenance.
+
+**Change data location** shows the current folder and offers Copy, Move, or Use existing database
+at destination. Use the Windows folder chooser or enter an absolute folder in Advanced. The database
+filename for a new location is `foxsuite.db`. Copy/Move reject an existing destination rather than
+overwriting it; Use existing rejects a missing/invalid database rather than creating an empty one.
+Move keeps `foxsuite-moved-<reference>.db` at the old location as a recovery copy (the original
+filename remains if its rename is unavailable, with a log warning). Backups stay in
+the original per-user backups folder. A safety backup precedes all changes; the source and database
+close before switching, and the browser reconnects. Canceling confirmation changes nothing.
+Do not run another CLI/writer against either database during restore/location changes.
+If an operation fails, Settings shows its error after reconnect; inspect the log and retained
+original/backup. Failed configuration save does not activate the new path. Keep adequate disk space
+for original, snapshot, archive and safety copy; use local SQLite storage, not a cloud-sync folder.
+
+Desktop settings precedence is defaults → saved per-user settings → explicit `foxsuite-desktop
+--config custom.toml`. An explicit override is read-only in graphical settings; existing developer
+`foxsuite --config ...` commands still use their original config and relative-path behavior.
+Use `foxsuite-desktop --user-directory ABSOLUTE_FOLDER --no-browser` for isolated diagnostics.
+Only one desktop instance per user root is allowed, with an OS lock released even after a crash.
+Back up settings/DB and CSV exports before upgrades; never open a newer schema with an older binary.
 
 Ctrl+C cancels TimeSync and closes serial/SQLite. Reconnect preserves partial fragments. Raw input commits before processing; disk/SQLite errors exit visibly. Fix capacity/permissions and restart to process pending rows. Parser failures retain status/error; replay after parser changes. Subscriber errors log without interrupting ingest; slow subscribers must enqueue work. Broken logging handlers cannot interrupt ingest.
 

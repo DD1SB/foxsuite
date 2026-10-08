@@ -11,6 +11,9 @@ Full FjwW competition workflow not tested.
 
 FoxLive: M3 implemented and automatically tested; physical hardware/manual validation pending.
 
+M4 adds a desktop operations layer and Windows release recipes; clean-Windows installer/USB
+acceptance remains pending. M3 physical acceptance is not implied by M4 automated checks.
+
 Runner RFID → FoxIdent → LoRa → FoxIdentServer → USB → foxcore → FoxBridge → COM pair → FjwW SI-C.
 
 M1 includes typed TOML config, reconnecting serial, source-derived parsing, canonical punches/UIDs,
@@ -24,6 +27,16 @@ a sibling consumer of FoxCore, not a FoxBridge client. No cloud, telemetry, CDN 
 
 ## Installation and configuration
 
+Normal Windows operation: install the self-contained FoxSuite installer, launch **FoxSuite** from
+Start, complete EN/DE setup (COM selection/test/data location), and FoxLive opens in your browser.
+No Python/Git/pip/TOML editing is needed. **System → Settings** manages connection, data folder,
+backup/restore and safe shutdown. User data lives under `%LOCALAPPDATA%\FoxSuite`, separately from
+installation/upgrades. See [Windows deployment and validation](docs/WINDOWS.md) and
+[operations](docs/OPERATIONS.md). Windows installer production/acceptance still requires a Windows
+release build; the repository includes PyInstaller/Inno Setup recipes, not a claimed tested installer.
+
+### Developer installation (preserved)
+
 Python 3.12+:
 
 ```sh
@@ -31,6 +44,7 @@ python -m venv .venv
 # Activate the environment for your platform's shell.
 python -m pip install -e '.[dev]'
 foxsuite --help
+foxsuite-desktop --help
 ```
 
 Copy `config/foxsuite.example.toml`, set the port and DB path, then:
@@ -157,9 +171,9 @@ mypy
 python -m build
 ```
 
-Tests require no hardware. After the focused M3 information-architecture pass, 227 tests pass on
-Python 3.12, including all ten Chromium workflows. Without optional browser execution, 217 pass
-and ten skip. Ruff lint/format and strict mypy pass on 53 Python source/test files.
+Tests require no hardware. With M4, 254 tests pass on Python 3.12, including all 14 Chromium
+workflows and all accepted M1/M2/M3 regressions. Without optional browser execution, 240 pass
+and 14 skip. Ruff lint/format and strict mypy pass on 63 Python source/test files.
 Lint, formatting, strict typing, sdist/wheel and clean offline installed-package
 HTTP/WebSocket/simulator smoke pass. All 518
 reference hashes remain unchanged. One upstream Starlette HTTPX deprecation warning is not suppressed.
@@ -177,10 +191,14 @@ migrations/recovery/dedupe; [operations](docs/OPERATIONS.md) includes the hardwa
 
 Repository: read-only `reference/`; shared `src/foxcore/`; gateway `src/foxbridge/` (config, mapping,
 encoder/time, delivery persistence/service, output and CLI); standalone `src/foxlive/` (domain,
-scoring, persistence, service, CSV, API, CLI, local templates/assets); hardware-free `tests/` with a
-published protocol vector; `config/`; `docs/`. Flat modules avoid speculative future packages.
+scoring, persistence, service, CSV, API, CLI, local templates/assets); operations `src/foxops/`
+(desktop launcher, user settings, ports, backup/restore, setup assets); `packaging/windows/`
+(maintainer build/bundle/installer recipes); hardware-free `tests/` with a published protocol vector;
+`config/`; `docs/`. Flat modules avoid speculative future packages.
 
 M2 transport acceptance is closed; full competition semantics, Start/Finish and long-running Fjw field
 operation remain unvalidated. Serial write is not receiver acknowledgement, and explicit resend/replay
 can duplicate competition data. FoxLive is implemented but its physical Windows desk acceptance and
-long-running Windows field operation are still pending. No M4 work has been started.
+long-running Windows field operation are still pending. M4 Windows installer execution, clean-PC
+deployment/upgrade/uninstall and real USB first-run testing remain pending; Linux self-contained
+bundle/installed-package checks are not Windows acceptance. No later feature milestone is included.

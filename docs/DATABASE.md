@@ -1,5 +1,14 @@
 # SQLite schema, version 4
 
+M4 introduces **no database migration** and changes no core, bridge or live source/domain tables.
+Desktop storage is outside installation, at `%LOCALAPPDATA%\FoxSuite\data\foxsuite.db` by default.
+Online backup includes committed WAL data using SQLite's backup API. The `.foxbackup` archive also
+contains settings and a checksummed manifest; restore validates integrity/schema and preserves
+current device/browser configuration. Restore/data-location changes close all owned handles first
+and create a safety backup. Copy/Move refuse existing destinations; Use existing refuses absent or
+invalid DBs. Move retains a named original recovery copy. See [operations](OPERATIONS.md) for the
+graphical workflow and exclusive-writer boundary; ZIP checksums are not signatures/authentication.
+
 One sqlite3 connection belongs to the ingest loop thread. WAL, synchronous FULL, foreign keys and a 5s busy timeout are enabled. Ordered SQL migrations run under BEGIN IMMEDIATE; `schema_migrations(version)` tracks applied IDs. Unknown/future or noncontiguous versions are rejected. Table creation is exclusively migration-driven.
 
 | Table | Purpose |

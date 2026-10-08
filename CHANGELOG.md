@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.0 — M4 Windows operations and deployment support
+
+Adds a separate desktop operations composition (`foxops`) with per-user absolute settings/data/
+logs/backups, atomic TOML saves, OS single-instance lock and Start-menu relaunch-to-browser behavior.
+Graphical EN/DE first-run setup enumerates described serial ports with retained USB metadata, tests
+through accepted raw-first ingest/TimeSync, selects the data location and opens FoxLive. Saved
+VID/PID/serial on a changed/missing/ambiguous port requires confirmation; no arbitrary port is claimed.
+System Settings offers connection, advanced intervals/logging/browser port, consistent online backup,
+checksummed archive import/download/restore and explicit Copy/Move/Use-existing data-folder changes.
+Safety backups, source/database shutdown, recoverable originals and failure-safe settings publication
+protect data-location changes; restore preserves current machine connection settings. No migrations,
+FoxCore/FoxBridge changes or competition-domain/scoring changes. Developer CLI remains unchanged.
+
+PyInstaller onedir/windowed desktop plus optional frozen CLI and per-user Inno Setup installer recipes
+bundle Python/dependencies/assets/timezones for offline Windows 11 x64 operation without Python/Git/
+shell/TOML editing. Installation/upgrades/uninstall do not target competition data or install drivers.
+Release-maintainer smoke exercises actual desktop setup, HTTP/WebSockets, backup/restore, data copy,
+restart and graceful shutdown. Normal user logs rotate outside installation.
+
+Validation: 254 tests pass, including all 14 Chromium workflows; 27 new operations/browser cases.
+Ruff lint/format, strict mypy (63 source/test files), sdist/wheel, offline installation and Linux
+self-contained bundle gates pass. All 518 reference hashes remain unchanged. Windows installer
+compilation/execution, clean-PC/USB deployment and M3 physical Windows acceptance remain pending;
+Linux checks are not hardware evidence. One upstream Starlette deprecation warning remains visible.
+
 ## M3 maintenance — event-desk information architecture
 
 Separates Event operations (overview/participants/categories/stations/live/rankings), Master data
