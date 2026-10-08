@@ -66,6 +66,7 @@ class EventData(Model):
     default_start_at: str | None = None
     minimum_unix_timestamp: int = Field(default=1577836800, ge=1, le=4294967295)
     maximum_receive_skew_seconds: int = Field(default=86400, ge=1, le=31536000)
+    tag_event_id: int | None = Field(default=None, ge=0, le=65535)
 
 
 class Event(EventData):
@@ -212,6 +213,11 @@ class Result(Model):
     elapsed: int | None = None
     rank: int | None = None
     eligible: bool = True
+    completeness: str = "PROVISIONAL"
+    recovered_controls: int = 0
+    open_reviews: int = 0
+    manual_decision: bool = False
+    provenance: str = "LIVE"
 
 
 class Calculation(Model):

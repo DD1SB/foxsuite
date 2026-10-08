@@ -121,6 +121,24 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "INSERT INTO live_entry_interpretations SELECT * FROM live_punch_interpretations",
         "INSERT INTO live_entry_results SELECT * FROM live_results",
     ),
+    (
+        "ALTER TABLE live_events ADD COLUMN tag_event_id INTEGER CHECK(tag_event_id BETWEEN 0 AND 65535)",
+        "CREATE TABLE tag_readout_sessions (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL REFERENCES live_events(id), received_at TEXT NOT NULL, provider TEXT NOT NULL, raw_payload BLOB NOT NULL, uid TEXT, reader TEXT, status TEXT NOT NULL, errors TEXT NOT NULL DEFAULT '[]')",
+        "CREATE INDEX tag_session_event_uid ON tag_readout_sessions(event_id,uid,id)",
+        "CREATE TABLE tag_readout_records (id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES tag_readout_sessions(id), file_id INTEGER, raw_value TEXT NOT NULL, raw_bytes BLOB, station_timestamp INTEGER, tag_event_id INTEGER, synchronized INTEGER, parse_status TEXT NOT NULL, error TEXT NOT NULL)",
+        "CREATE INDEX tag_record_session_file ON tag_readout_records(session_id,file_id,id)",
+        "CREATE TABLE live_evidence_decisions (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, participant_id INTEGER NOT NULL, station_id INTEGER NOT NULL, action TEXT NOT NULL, source_type TEXT, source_id INTEGER, station_timestamp INTEGER, fingerprint TEXT NOT NULL, reason TEXT NOT NULL, operator TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(event_id,participant_id) REFERENCES live_entries(event_id,id))",
+        "CREATE INDEX live_decision_station ON live_evidence_decisions(event_id,participant_id,station_id,id)",
+        "CREATE TABLE live_resolutions (event_id INTEGER NOT NULL REFERENCES live_events(id), uid TEXT NOT NULL, station_id INTEGER NOT NULL, participant_id INTEGER, payload TEXT NOT NULL, PRIMARY KEY(event_id,uid,station_id), FOREIGN KEY(event_id,participant_id) REFERENCES live_entries(event_id,id))",
+        "CREATE TABLE live_review_cases (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL REFERENCES live_events(id), uid TEXT NOT NULL, station_id INTEGER NOT NULL, participant_id INTEGER, status TEXT NOT NULL CHECK(status IN ('OPEN','RESOLVED')), payload TEXT NOT NULL, decision_id INTEGER REFERENCES live_evidence_decisions(id), UNIQUE(event_id,uid,station_id), FOREIGN KEY(event_id,participant_id) REFERENCES live_entries(event_id,id))",
+        "CREATE INDEX live_review_open ON live_review_cases(event_id,status)",
+        "CREATE TRIGGER tag_record_no_update BEFORE UPDATE ON tag_readout_records BEGIN SELECT RAISE(ABORT,'Tag records are immutable'); END",
+        "CREATE TRIGGER tag_record_no_delete BEFORE DELETE ON tag_readout_records BEGIN SELECT RAISE(ABORT,'Tag records are immutable'); END",
+        "CREATE TRIGGER tag_session_no_update BEFORE UPDATE ON tag_readout_sessions WHEN OLD.status<>'PENDING' BEGIN SELECT RAISE(ABORT,'Tag sessions are immutable'); END",
+        "CREATE TRIGGER tag_session_no_delete BEFORE DELETE ON tag_readout_sessions BEGIN SELECT RAISE(ABORT,'Tag sessions are immutable'); END",
+        "CREATE TRIGGER evidence_decision_no_update BEFORE UPDATE ON live_evidence_decisions BEGIN SELECT RAISE(ABORT,'Decisions are append-only'); END",
+        "CREATE TRIGGER evidence_decision_no_delete BEFORE DELETE ON live_evidence_decisions BEGIN SELECT RAISE(ABORT,'Decisions are append-only'); END",
+    ),
 )
 
 

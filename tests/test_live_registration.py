@@ -391,7 +391,7 @@ def test_migration_three_retains_legacy_and_rebuilds_identically(tmp_path: Path)
         }
         store.close()
     store = Store(path)
-    assert store.version == 4
+    assert store.version == len(MIGRATIONS)  # Later additive migrations preserve M3 conversion.
     live = LiveService(LiveRepository(store))
     assert len(live.repo.runners()) == 2 and all(r.birth_year is None for r in live.repo.runners())
     assert len(live.repo.clubs()) == 1
