@@ -168,3 +168,14 @@ Large operator-triggered recalculation/import is synchronous and may briefly pau
 this is deliberately a small single-operator event desk, not a multi-user/distributed service.
 See [FOXLIVE](FOXLIVE.md) for timing, tie, correction and restart contracts. Full SPORTident readout,
 station programming, complete Fjw replacement and all later milestones remain out of scope.
+# M5 evidence boundary
+
+Offline readout acquisition is separate from interpretation: a small provider
+returns an immutable snapshot; raw snapshot persistence precedes reconciliation.
+LIVE references FoxCore IDs, TAG_READOUT references raw station records, and
+MANUAL references append-only reasoned decisions. FoxLive's resolved cache feeds
+the existing scorer; no alternate serial reader or scoring strategy is added.
+See [TAG_READOUT.md](TAG_READOUT.md) and [RECONCILIATION.md](RECONCILIATION.md).
+SQLite writes remain serialized on the existing application owner loop. Snapshot
+facts commit before derived processing; a downstream failure is recoverable by
+recalculation. Slow WebSocket clients continue using the existing bounded hub.
