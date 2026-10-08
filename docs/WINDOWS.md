@@ -82,11 +82,29 @@ Git, pip, shell or Internet is needed on the event PC. No USB/virtual-COM driver
 Build tooling is for release maintainers, not operators. Signing/SmartScreen reputation and USB
 drivers require release/Windows validation. Linux tests cannot prove a Windows installer works.
 
-On a Windows x64 release machine, install Python 3.12+, Inno Setup 6 and the project's
-`.[dev,ui-test,windows-build]` dependencies in an isolated build environment. Run all existing
-Chromium workflows (`FOXSUITE_BROWSER_TESTS=1`, Playwright Chromium installed), then
-`packaging\windows\build.ps1 -Python PATH_TO_BUILD_PYTHON -Iscc PATH_TO_ISCC`.
-The script checks tests/lint/format/types, builds wheel/sdist, bundles both windowed `FoxSuite.exe`
+On a Windows x64 release machine with 64-bit Python 3.12+ and Inno Setup 6 installed, run from a
+fresh source checkout in PowerShell:
+
+```powershell
+.\packaging\windows\build.ps1
+```
+
+No activated venv or globally installed Python package is required. The script finds `py -3` or a
+supported `python` on PATH (or accepts `-Python 'C:\path\to\python.exe'`), finds `ISCC.exe` on PATH,
+under Program Files or in the per-user LocalAppData Programs directory (or accepts
+`-Iscc 'C:\path\to\ISCC.exe'`), and gives an actionable error if either external tool is missing.
+It creates/reuses `.venv-windows-build\` in the checkout, upgrades pip *there*, installs the
+declared setuptools/wheel/build backend and `.[dev,ui-test,windows-build]` dependencies *there*,
+then uses only that interpreter for the build. On a later run it refreshes the dependencies; if
+the venv is incomplete, exposes global packages or uses an unsupported Python, remove only
+`.venv-windows-build\` and rerun.
+The build host needs access to the required Python packages (Internet or configured local wheels);
+the installed application still has no runtime network dependency. For optional Chromium tests, run
+`.\.venv-windows-build\Scripts\python.exe -m playwright install chromium` after the first build
+bootstrap, then set `$env:FOXSUITE_BROWSER_TESTS="1"` and rerun the build script. The default test
+gate retains its existing optional-browser skips when that flag is unset.
+
+The script checks tests/lint/format/strict types, builds wheel/sdist, bundles both windowed `FoxSuite.exe`
 and optional console `foxsuite-cli.exe`, tests frozen CLI and desktop HTTP/WebSocket/backup/restart
 startup with `packaging/smoke.py`, then compiles
 `dist\installer\FoxSuite-0.4.0-windows-x64-setup.exe` and prints its SHA-256.

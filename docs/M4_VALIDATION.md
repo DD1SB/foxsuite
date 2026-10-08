@@ -78,6 +78,25 @@ workflows and real PTY capture; Ruff lint/format pass; strict mypy passes for Li
 targets (also Windows/Python 3.13). All 518 reference hashes remain unchanged. The existing upstream
 Starlette warning remains visible. No production files or quality settings changed.
 
+## Native Windows release-build bootstrap
+
+The maintainer's next Windows run passed **253 tests**, skipped 15 platform/optional cases, and
+passed Ruff and strict mypy. The package build then stopped because the caller's Python did not
+have `setuptools.build_meta`; no frozen application or installer was built in that run.
+
+The Windows build script now creates/reuses `.venv-windows-build`, upgrades pip there, installs the
+declared setuptools/wheel/build tools and `.[dev,ui-test,windows-build]` extras there, and uses that
+interpreter for every existing gate. It finds a supported base Python and an Inno Setup 6 compiler
+before installing packages. The PEP 517 backend and wheel requirement are explicit in `pyproject.toml`.
+On Linux, PowerShell syntax and the interpreter/compiler helper behavior passed with PowerShell.
+The complete Python 3.12 suite passed **268 tests with all Chromium workflows enabled**. A clean
+Python 3.12 venv started without setuptools, upgraded pip, installed the declared backend and extras,
+then passed its default suite (**254 passed, 14 existing optional skips**), Ruff lint/format, strict
+mypy and `build --no-isolation`. Its Linux PyInstaller bundle and installed/frozen desktop smoke also
+passed. All 518 reference firmware hashes match the baseline. One existing upstream Starlette
+warning remains visible. A native Windows rerun of `packaging\windows\build.ps1` is still needed to
+validate the frozen Windows application and installer. M3 physical acceptance remains pending.
+
 ## Original M4 implementation checks (Linux)
 
 | Gate | Evidence and boundary |

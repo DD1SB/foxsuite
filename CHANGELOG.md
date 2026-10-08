@@ -1,5 +1,15 @@
 # Changelog
 
+## M4 maintenance — Windows release-build bootstrap
+
+The Windows build script now selects a supported Python and Inno Setup compiler, creates/reuses an
+ignored local build venv, upgrades pip and installs setuptools, wheel, build and the declared
+dev/browser/PyInstaller extras inside it. Existing Python test, lint, type, package and frozen-app
+smoke gates use that venv; Inno Setup compiles the installer afterward. PEP 517 requirements are
+explicit in `pyproject.toml`. Missing external tools produce actionable errors. Global Python
+packages and venv activation are no longer prerequisites. Native Windows installer validation is
+pending.
+
 ## M4 maintenance — PTY test portability
 
 The optional POSIX serial-capture test now has a type-checker-visible Windows skip guard as well

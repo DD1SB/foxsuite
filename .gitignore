@@ -1,4 +1,5 @@
 .venv/
+.venv-windows-build/
 __pycache__/
 *.egg-info/
 .pytest_cache/
@@ -11,4 +12,3 @@ data/
 *.db-wal
 *.db-shm
 reference/**/.git/
-

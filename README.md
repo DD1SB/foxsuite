@@ -34,6 +34,9 @@ backup/restore and safe shutdown. User data lives under `%LOCALAPPDATA%\FoxSuite
 installation/upgrades. See [Windows deployment and validation](docs/WINDOWS.md) and
 [operations](docs/OPERATIONS.md). Windows installer production/acceptance still requires a Windows
 release build; the repository includes PyInstaller/Inno Setup recipes, not a claimed tested installer.
+On a Windows release machine with Python 3.12+ and Inno Setup 6, run
+`.\packaging\windows\build.ps1` from a source checkout. It creates its own local build venv and
+installs the declared build/test dependencies; see [one-command build setup](docs/WINDOWS.md#packaging-and-evidence).
 
 ### Developer installation (preserved)
 
