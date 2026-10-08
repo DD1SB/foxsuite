@@ -10,6 +10,7 @@ from foxcore.events import Punch
 from foxcore.logging import SafeLogger
 from foxcore.protocol import normalize_uid
 
+from .evidence import EvidenceService
 from .lookup import club_matches, comparable
 from .models import (
     Category,
@@ -49,6 +50,8 @@ class LiveService:
         self.operator = operator
         self.publish = publish or (lambda _type, _event, _payload: None)
         self.failure: Exception | None = None
+        self.evidence = EvidenceService(self)
+        self.review_notifications: dict[int, dict[int, str]] = {}
 
     def mutable(self, event_id: int) -> Event:
         event = self.repo.event(event_id)
@@ -114,7 +117,7 @@ class LiveService:
         self.notify(event_id, "event_state_changed")
         return event
 
-    def transition(self, event_id: int, state: State) -> Event:
+    def transition(self, event_id: int, state: State, confirm_reviews: bool = False) -> Event:
         event = self.mutable(event_id)
         allowed = {
             State.DRAFT: {State.RUNNING, State.ARCHIVED},
@@ -123,6 +126,8 @@ class LiveService:
         }
         if state == event.state:
             return event
+        if state == State.CLOSED and self.evidence.reviews(event_id) and not confirm_reviews:
+            raise ValueError("Open review cases remain; confirm close with provisional results")
         if state not in allowed.get(event.state, set()):
             raise ValueError(f"Cannot transition {event.state} to {state}")
         other = self.repo.running()
@@ -522,13 +527,17 @@ class LiveService:
             self.repo.punches(event_id, uid),
             self.repo.exclusions(event_id),
         )
+        self.review_notifications.setdefault(
+            event_id, {r["id"]: r["status"] for r in self.evidence.reviews(event_id, True)}
+        )
+        resolved = self.evidence.calculate(event_id, selected, uid)
         for item in calculation.interpretations:
             self.repo.db.execute(
                 "INSERT INTO live_entry_interpretations VALUES (?,?,?,?,?,?) ON CONFLICT(event_id,punch_id) "
                 "DO UPDATE SET participant_id=excluded.participant_id,status=excluded.status,role=excluded.role,reason=excluded.reason",
                 (event_id, item.punch_id, item.participant_id, item.status, item.role, item.reason),
             )
-        for result in calculation.results:
+        for result in resolved.results:
             self.repo.db.execute(
                 "INSERT INTO live_entry_results VALUES (?,?,?) ON CONFLICT(event_id,participant_id) "
                 "DO UPDATE SET payload=excluded.payload",
@@ -544,7 +553,11 @@ class LiveService:
                 if r.model_dump_json() != previous[r.participant_id]
             ],
         )
-        return {"source_punches": len(calculation.interpretations)} | calculation.counts
+        return {
+            "source_punches": len(calculation.interpretations),
+            "recovered_controls": sum(r.recovered_controls for r in resolved.results),
+            "open_reviews": len(self.evidence.reviews(event_id)),
+        } | calculation.counts
 
     def recalculate(self, event_id: int) -> dict[str, int]:
         self.mutable(event_id)
@@ -632,6 +645,12 @@ class LiveService:
             log.warning("ERROR FoxLive processing failed; source remains stored: %s", exc)
 
     def recover(self) -> None:
+        self.evidence.recover_pending()
+        for historical in self.repo.events():
+            if historical.state != State.ARCHIVED:
+                with self.repo.db:
+                    self._calculate(historical.id)
+        self.review_notifications.clear()  # Restart is not a new readout/review arrival.
         event = self.repo.running()
         if event is None:
             return
@@ -655,9 +674,21 @@ class LiveService:
             self._calculate(event.id)
 
     def notify(self, event_id: int, kind: str, payload: dict[str, Any] | None = None) -> None:
+        before = self.review_notifications.pop(event_id, None)
+        if before is not None:
+            self.evidence.publish_review_changes(event_id, before)
         self.publish(kind, event_id, payload or {})
         if kind != "ranking_changed":
             self.publish("ranking_changed", event_id, {})
+        if (
+            kind != "reconciliation_updated"
+            and self.repo.db.execute(
+                "SELECT EXISTS(SELECT 1 FROM tag_readout_sessions WHERE event_id=?) OR "
+                "EXISTS(SELECT 1 FROM live_evidence_decisions WHERE event_id=?)",
+                (event_id, event_id),
+            ).fetchone()[0]
+        ):
+            self.publish("reconciliation_updated", event_id, {})
 
     def snapshot(self, event_id: int | None = None) -> dict[str, Any]:
         events = self.repo.events()
@@ -687,6 +718,9 @@ class LiveService:
             "recent": [],
             "unknown": [],
             "results": [],
+            "readouts": [],
+            "reviews": [],
+            "reconciliation": {},
         }
         if event_id is None:
             return base
@@ -717,6 +751,13 @@ class LiveService:
                 (event_id,),
             )
         }
+        results = self.repo.results(event_id)
+        reviews = self.evidence.reviews(event_id)
+        evidence_counts = self.repo.db.execute(
+            "SELECT (SELECT COUNT(*) FROM tag_readout_sessions WHERE event_id=?),"
+            "(SELECT COUNT(*) FROM live_evidence_decisions WHERE event_id=?)",
+            (event_id, event_id),
+        ).fetchone()
         return base | {
             "event": event.model_dump(mode="json"),
             "participants": [e.model_dump(mode="json") for e in self.repo.entries(event_id)],
@@ -729,8 +770,15 @@ class LiveService:
             ],
             "recent": recent,
             "unknown": unknown,
+            "readouts": self.evidence.sessions(event_id, 20),
+            "reviews": reviews,
+            "reconciliation": {
+                "readouts": evidence_counts[0],
+                "recovered": sum(r.recovered_controls for r in results),
+                "open_reviews": len(reviews),
+                "manual_decisions": evidence_counts[1],
+            },
             "results": [
-                r.model_dump(mode="json")
-                for r in DistinctControlsThenTime().calculate(self.repo.results(event_id))
+                r.model_dump(mode="json") for r in DistinctControlsThenTime().calculate(results)
             ],
         }

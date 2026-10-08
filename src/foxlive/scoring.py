@@ -1,9 +1,9 @@
 """Pure deterministic interpretation and the one M3 scoring strategy."""
 
 from collections import Counter
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
-
-from foxcore.events import Punch
 
 from .models import (
     Calculation,
@@ -26,6 +26,23 @@ from .models import (
 
 class ScoringStrategy(Protocol):
     def calculate(self, results: list[Result]) -> list[Result]: ...
+
+
+class ScoringObservation(Protocol):
+    """Structural scoring input: source Punch or separate resolved evidence, never a new source fact."""
+
+    @property
+    def id(self) -> int | None: ...
+    @property
+    def uid(self) -> str: ...
+    @property
+    def station_id(self) -> int: ...
+    @property
+    def station_timestamp(self) -> int: ...
+    @property
+    def received_at_pc(self) -> datetime: ...
+    @property
+    def duplicate(self) -> bool: ...
 
 
 class DistinctControlsThenTime:
@@ -70,7 +87,7 @@ def interpret(
     entries: list[Entry],
     categories: list[Category],
     stations: dict[int, tuple[Role, bool]],
-    punches: list[Punch],
+    punches: Sequence[ScoringObservation],
     exclusions: dict[int, str],
 ) -> Calculation:
     active = {e.uid: e for e in entries if e.active and e.uid}
