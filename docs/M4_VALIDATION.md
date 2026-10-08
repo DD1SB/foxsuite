@@ -3,6 +3,60 @@
 Accepted baseline: `4cef9abdb8e0a87d80b24cf16c12b6e91c0a8abf`. M1/M2 acceptance remains
 unchanged; **M3 physical Windows acceptance is still pending**. No M4 physical evidence supplied.
 
+## Native Windows filesystem correction
+
+The operator subsequently reported Windows 11 / Python 3.13: **9 failed, 230 passed, 15 skipped**.
+The first traceback identified `data.backup` reopening a completed ZIP as `rb` before `fsync`, which
+raises `OSError: [Errno 9] Bad file descriptor` on native Windows. An operations-test guard enforcing
+writable regular-file descriptors (zero-byte access check followed by **real** `fsync`) reproduced
+exactly the same nine failing tests on Linux, including the KeyError and message-assertion cascades.
+The same tests passed after correcting the handle; those assertions were not weakened.
+
+`foxops.files.sync_file` reopens completed files as `r+b` and closes the handle before replacement.
+Closed database snapshots, validated restore staging files and imported backup archives also use it.
+The [filesystem audit](WINDOWS.md#filesystem-durability-audit) records every flush/replacement path,
+including settings, backup, Copy/Move/Use-existing, restore, import and unchanged FoxBridge captures.
+No global fsync disabling, directory-fsync workaround, new migration or domain/protocol change.
+
+New regressions exercise real platform flushes, preserved bytes, closed handles, failed staging
+flushes, failure-safe settings and source data, and flush-before-publication order. This environment
+is Linux: **native Windows retest and release packaging remain pending**, not inferred from these
+regressions. Required release-machine commands, using the same Windows Python/environment as the
+original failure:
+
+```powershell
+python -m pytest tests/test_operations.py -vv
+python -m pytest -q
+python -m ruff check src tests
+python -m ruff format --check src tests
+python -m mypy src tests
+.\packaging\windows\build.ps1
+```
+
+Run existing Chromium workflows as described in WINDOWS when their dependencies are installed.
+Do not declare this Windows repair validated until the full native suite passes and `build.ps1`
+reaches packaging; retain its complete test/build output as release evidence. The historical Linux
+implementation results below are not evidence of a passing native Windows retest.
+
+Correction checks performed here (Linux):
+
+- `python -m pytest tests/test_operations.py -vv`: **36 passed**, including 13 new regression cases.
+- Full Python 3.12 suite with `FOXSUITE_BROWSER_TESTS=1`: **267 passed, none skipped**, including
+  all 14 Chromium workflows.
+- Full Python 3.13 suite: **253 passed, 14 optional browser cases skipped** in that environment;
+  those same browser cases were all executed in the Python 3.12 full suite.
+- Ruff lint/format pass; strict mypy passes on 64 source/test files (65 including release smoke).
+- Wheel/sdist and Linux PyInstaller bundle build; fresh offline wheel installation, installed
+  desktop and frozen desktop HTTP/WebSocket/backup/restore/data-copy/restart/shutdown smokes pass.
+- All 518 reference firmware hashes match the baseline; no FoxCore/FoxBridge/FoxLive changes.
+- One existing upstream Starlette deprecation warning remains visible; no gate was weakened and
+  no existing assertion or skip condition was changed.
+
+**Not executed here:** native Windows full-suite retest, Windows `build.ps1`, Inno Setup packaging
+and physical Windows acceptance. Linux bundle output is not a Windows release artifact.
+
+## Original M4 implementation checks (Linux)
+
 | Gate | Evidence and boundary |
 | --- | --- |
 | Full Python 3.12 suite | 254 passed, including all accepted M1/M2/M3 tests and 27 new operations/browser cases |

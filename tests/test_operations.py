@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import os
+import stat
 import sys
 import zipfile
 from contextlib import closing
@@ -13,17 +15,36 @@ import pytest
 from fastapi.testclient import TestClient
 from serial.tools.list_ports_common import ListPortInfo
 
+from foxbridge.output import FileOutput
 from foxcore.config import Config, SerialConfig
 from foxcore.persistence import Store
 from foxcore.serial import FakeTransport
 from foxcore.service import IngestService
 from foxlive.config import LiveConfig
 from foxops import data, i18n, native, ports
+from foxops.files import sync_file
 from foxops.launcher import instance
 from foxops.settings import Device, Locations, Settings, encode, load, save, user_root
 from foxops.web import ConnectionTestInput, Controller, create_app
 
 TAG = b'{"type":"tag","station":1,"sequence":1,"timestamp":1791280800,"uid":"046365525C6180"}\n'
+
+
+@pytest.fixture(autouse=True)
+def writable_fsync(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enforce Windows' writable-file requirement even on permissive POSIX hosts.
+
+    A zero-byte write checks descriptor access without changing file contents. Every
+    accepted call still performs the real fsync; directory handles are not accepted.
+    """
+    real_fsync = os.fsync
+
+    def checked(descriptor: int) -> None:
+        assert stat.S_ISREG(os.fstat(descriptor).st_mode)
+        os.write(descriptor, b"")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", checked)
 
 
 def fixture(tmp_path: Path, completed: bool = False) -> tuple[Locations, Settings]:
@@ -460,3 +481,216 @@ def test_second_desktop_launch_reopens_existing_browser_without_another_writer(
     with instance(locations):
         launcher.main()
     assert opened == ["http://127.0.0.1:8765/setup"]
+
+
+def test_completed_file_flush_preserves_bytes_and_closes_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Runs the real fsync/_commit on every platform, including native Windows."""
+    path = tmp_path / "completed.bin"
+    content = b"completed archive\x00\xff"
+    path.write_bytes(content)
+    descriptors: list[int] = []
+    real_fsync = os.fsync
+
+    def flushed(descriptor: int) -> None:
+        real_fsync(descriptor)
+        descriptors.append(descriptor)
+
+    monkeypatch.setattr(os, "fsync", flushed)
+    sync_file(path)
+    assert len(descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])
+    target = tmp_path / "published.bin"
+    path.replace(target)  # A still-open flush handle would interfere on Windows.
+    assert target.read_bytes() == content
+    missing = tmp_path / "missing.bin"
+    with pytest.raises(FileNotFoundError):
+        sync_file(missing)
+    assert not missing.exists()
+
+
+def test_completed_file_flush_failure_propagates_and_closes_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "completed.bin"
+    path.write_bytes(b"unchanged")
+    descriptors: list[int] = []
+
+    def failed(descriptor: int) -> None:
+        descriptors.append(descriptor)
+        raise OSError("flush failed")
+
+    monkeypatch.setattr(os, "fsync", failed)
+    with pytest.raises(OSError, match="flush failed"):
+        sync_file(path)
+    assert len(descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])
+    assert path.read_bytes() == b"unchanged"
+
+
+def test_settings_flush_failure_preserves_saved_preferences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    locations, settings = fixture(tmp_path)
+    save(locations, settings)
+    before = locations.settings.read_bytes()
+
+    def failed(descriptor: int) -> None:
+        raise OSError("settings flush failed")
+
+    monkeypatch.setattr(os, "fsync", failed)
+    with pytest.raises(OSError, match="settings flush failed"):
+        save(locations, replace(settings, language="de"))
+    assert locations.settings.read_bytes() == before and load(locations) == settings
+    assert not list(locations.settings.parent.glob(".foxsuite-*"))
+
+
+def test_backup_archive_flush_failure_does_not_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    locations, settings = fixture(tmp_path)
+    real_sync = sync_file
+
+    def failed(path: Path) -> None:
+        if path.name == "archive":
+            raise OSError("archive flush failed")
+        real_sync(path)
+
+    monkeypatch.setattr(data, "sync_file", failed)
+    with closing(Store(locations.database)) as store:
+        IngestService(store).ingest(TAG, "serial:COM3")
+        with pytest.raises(OSError, match="archive flush failed"):
+            data.backup(store, locations, settings)
+        assert store.stats()["raw_events"] == 1
+    assert not list(locations.backups.iterdir())
+
+
+@pytest.mark.parametrize("mode", ["copy", "move"])
+def test_location_snapshot_flush_failure_preserves_original_and_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    locations, settings = fixture(tmp_path)
+    save(locations, settings)
+    with closing(Store(locations.database)) as store:
+        IngestService(store).ingest(TAG, "serial:COM3")
+    destination = tmp_path / "other"
+    real_sync = sync_file
+
+    def failed(path: Path) -> None:
+        if path.is_relative_to(destination):
+            raise OSError("snapshot flush failed")
+        real_sync(path)
+
+    monkeypatch.setattr(data, "sync_file", failed)
+    with pytest.raises(OSError, match="snapshot flush failed"):
+        data.change_location(locations, settings, destination, cast(Any, mode))
+    assert load(locations) == settings and not (destination / "foxsuite.db").exists()
+    assert len(list(locations.backups.glob("*.foxbackup"))) == 1
+    assert not list(destination.glob(".foxsuite-*"))
+    with closing(Store(locations.database)) as store:
+        assert store.stats()["raw_events"] == 1
+
+
+@pytest.mark.parametrize("stage", ["restored_database", "safety_backup"])
+def test_restore_flush_failure_preserves_current_source_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    locations, settings = fixture(tmp_path)
+    with closing(Store(locations.database)) as store:
+        archive = data.backup(store, locations, settings)
+        IngestService(store).ingest(TAG, "serial:COM3")
+        IngestService(store).ingest(b"not in backup\xff\n", "serial:COM3")
+        before = [tuple(row) for row in store.db.execute("SELECT * FROM raw_events")]
+    real_sync = sync_file
+
+    def failed(path: Path) -> None:
+        if (stage == "restored_database" and path.parent.name.startswith(".restore-")) or (
+            stage == "safety_backup" and path.name == "archive"
+        ):
+            raise OSError("restore flush failed")
+        real_sync(path)
+
+    monkeypatch.setattr(data, "sync_file", failed)
+    with pytest.raises(OSError, match="restore flush failed"):
+        data.restore(locations, settings, archive)
+    with closing(Store(locations.database)) as store:
+        assert [tuple(row) for row in store.db.execute("SELECT * FROM raw_events")] == before
+    assert list(locations.backups.glob("*.foxbackup")) == [archive]
+    assert not list(locations.database.parent.glob(".restore-*"))
+
+
+@pytest.mark.parametrize("operation", ["backup", "copy", "restore"])
+def test_staging_files_are_synced_before_atomic_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    locations, settings = fixture(tmp_path)
+    with closing(Store(locations.database)) as store:
+        IngestService(store).ingest(TAG, "serial:COM3")
+        archive = data.backup(store, locations, settings)
+    flushed: set[Path] = set()
+    published: list[Path] = []
+    real_sync, real_replace = sync_file, Path.replace
+
+    def synced(path: Path) -> None:
+        real_sync(path)
+        flushed.add(path)
+
+    def publish(path: Path, target: Path) -> Path:
+        if target.suffix in {".foxbackup", ".db"}:
+            assert path in flushed
+            published.append(target)
+        return real_replace(path, target)
+
+    monkeypatch.setattr(data, "sync_file", synced)
+    monkeypatch.setattr(Path, "replace", publish)
+    if operation == "backup":
+        with closing(Store(locations.database)) as store:
+            data.backup(store, locations, settings)
+    elif operation == "copy":
+        data.change_location(locations, settings, tmp_path / "other", "copy")
+    else:
+        data.restore(locations, settings, archive)
+    assert len(published) == (1 if operation == "backup" else 2)
+
+
+def test_import_flush_failure_does_not_publish_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    locations, settings = fixture(tmp_path)
+    with closing(Store(locations.database)) as store:
+        archive = data.backup(store, locations, settings)
+
+    def failed(path: Path) -> None:
+        assert path.name == "upload"
+        raise OSError("import flush failed")
+
+    monkeypatch.setattr("foxops.web.sync_file", failed)
+    controller = Controller(locations, settings, lambda: None)
+    with TestClient(create_app(controller), base_url="http://127.0.0.1") as client:
+        response = client.post(
+            "/api/ops/import",
+            content=archive.read_bytes(),
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        assert response.status_code == 503 and "Traceback" not in response.text
+    assert list(locations.backups.iterdir()) == [archive]
+
+
+def test_bridge_capture_uses_writable_fsync(tmp_path: Path) -> None:
+    """The accepted append-only bridge path also exercises the writable-fd guard."""
+    path = tmp_path / "capture.bin"
+    path.write_bytes(b"previous")
+
+    async def capture() -> None:
+        output = FileOutput(path)
+        await output.connect()
+        try:
+            await output.write(b"new frame")
+        finally:
+            await output.close()
+
+    asyncio.run(capture())
+    assert path.read_bytes() == b"previousnew frame"

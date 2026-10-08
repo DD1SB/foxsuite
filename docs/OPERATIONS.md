@@ -195,6 +195,11 @@ audit; these are whole-database backups, not single-event exports. No cloud or a
 Restore preserves this machine's current serial/HTTP settings and makes a safety backup first.
 Only restore backups you trust; checksums detect corruption, not malicious provenance.
 
+Backup/import archives and completed copy/restore database files are explicitly flushed through
+writable, non-truncating handles before publication, including on native Windows. Flush failures
+abort the operation rather than silently accepting an undurable file. Keep the current data and
+safety archives until the operation has succeeded; see the filesystem audit in [WINDOWS](WINDOWS.md).
+
 **Change data location** shows the current folder and offers Copy, Move, or Use existing database
 at destination. Use the Windows folder chooser or enter an absolute folder in Advanced. The database
 filename for a new location is `foxsuite.db`. Copy/Move reject an existing destination rather than

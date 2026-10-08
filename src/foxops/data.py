@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import os
 import sqlite3
 import tempfile
 import zipfile
@@ -16,6 +15,7 @@ from uuid import uuid4
 from foxcore.logging import SafeLogger
 from foxcore.persistence import MIGRATIONS, Store
 
+from .files import sync_file
 from .settings import Locations, Settings, encode, save
 
 MAX_ARCHIVE_BYTES = 8 * 1024**3
@@ -66,6 +66,7 @@ def snapshot(store: Store, target: Path) -> None:
     with closing(sqlite3.connect(target)) as db:
         store.db.backup(db)
     validate_database(target)
+    sync_file(target)
 
 
 def backup(store: Store, locations: Locations, settings: Settings) -> Path:
@@ -90,8 +91,7 @@ def backup(store: Store, locations: Locations, settings: Settings) -> Path:
             archive.write(database, "foxsuite.db")
             archive.writestr("settings.toml", config)
             archive.writestr("manifest.json", json.dumps(manifest))
-        with temporary.open("rb") as stream:
-            os.fsync(stream.fileno())
+        sync_file(temporary)
         temporary.replace(target)
     return target
 
@@ -127,6 +127,7 @@ def unpack(archive: Path, destination: Path) -> None:
             if digest(destination) != manifest["sha256"]["foxsuite.db"]:
                 raise ValueError("Backup database checksum failed")
         validate_database(destination)
+        sync_file(destination)
     except (zipfile.BadZipFile, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError("Backup is invalid") from exc
 

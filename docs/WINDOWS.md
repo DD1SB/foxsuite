@@ -46,6 +46,34 @@ Move publishes the new settings before renaming the old recovery copy, eliminati
 in which the old configured path could disappear. If the recovery rename fails it remains under
 its original filename with a warning; the successfully committed new data location stays active.
 
+### Filesystem durability audit
+
+Completed staging files use `foxops.files.sync_file`: reopen **`r+b`**, call the real `os.fsync`, then
+close the handle before publication. No creation/truncation, permission bypass or ignored flush
+failure is involved. A read-only `rb` handle is only used for reading/checksums, never for flushing.
+Python uses Windows' `_commit` for `os.fsync`; Windows file-buffer flushing requires write access.
+See [Python fsync](https://docs.python.org/3.13/library/os.html#os.fsync) and
+[Microsoft FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers).
+
+| Path | Flush and publication order |
+| --- | --- |
+| Settings and running-instance marker | `mkstemp` writable descriptor; write, Python `flush`, `fsync`, close, replace in the same directory |
+| Backup | Close SQLite snapshot connection, validate/flush snapshot; close complete ZIP, flush ZIP, replace on destination volume |
+| Copy/Move | Flush completed destination snapshot before replace; safety backup and source checkpoint retained; save settings before optional recovery rename |
+| Use existing | Validate existing destination without replacing it; safety backup current data, checkpoint source, durably save settings |
+| Restore | Validate/flush staged database before safety backup/checkpoint/shutdown and current-database replacement |
+| Archive import | Close uploaded archive, validate contents, flush archive before publishing its generated backup name |
+| FoxBridge capture | Existing unbuffered writable `ab` handle; real `fsync` after each complete write; unchanged |
+
+All replacements retain the existing destination-volume staging strategy; handles owned by SQLite,
+ZIP and flushing code are closed before replacement. Windows sharing/permission failures propagate;
+the optional recovery-copy rename retains its existing warning-only handling *after* the new settings
+and data are committed. No directory-descriptor `fsync` calls existed or have been added: POSIX-style
+directory descriptors are not a portable Windows flushing interface. No existing file flush is
+disabled on Windows. Flushed file contents and same-volume publication must not be confused with
+a portable transaction over directory metadata/settings/data, or a hardware power-loss guarantee
+independent of the filesystem/storage device. Recovery copies and safety archives remain essential.
+
 ## Packaging and evidence
 
 Build the PyInstaller one-directory bundle and Inno Setup per-user installer on Windows. The

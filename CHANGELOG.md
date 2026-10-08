@@ -1,5 +1,23 @@
 # Changelog
 
+## M4 maintenance — Windows filesystem durability
+
+Completed backup archives now reopen with a non-truncating `r+b` handle before `fsync`, fixing the
+native Windows/Python 3.13 `EBADF` failure. A small operations-only helper also flushes closed SQLite
+snapshots, validated restore staging databases and imported archives before publication. Flush
+errors remain visible; settings' writable-handle flush, same-volume replacements, safety backups
+and recovery/configuration ordering are preserved. No Core/Bridge/scoring/schema changes.
+
+Operations tests enforce Windows' writable-file requirement while still calling the real `fsync`
+on all platforms. The guard reproduced exactly the nine reported failures before the fix, including
+the cascading KeyError and message assertions. New regressions cover non-truncation, handle closure,
+flush-error propagation and preservation of current data/settings when staging flushes fail.
+Native Windows full-suite and `packaging\windows\build.ps1` validation remain required; passing Linux
+tests does not establish a successful Windows build. See M4_VALIDATION for results and boundaries.
+Linux correction checks: 36 operations cases and all 267 full-suite cases pass, including 14 Chromium
+workflows; Ruff lint/format, strict mypy, wheel/sdist, offline installation and installed/frozen
+desktop smokes pass. All 518 firmware hashes are unchanged. Native Windows packaging is pending.
+
 ## 0.4.0 — M4 Windows operations and deployment support
 
 Adds a separate desktop operations composition (`foxops`) with per-user absolute settings/data/

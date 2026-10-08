@@ -24,6 +24,7 @@ from foxlive.web import Runtime, source
 from foxlive.web import create_app as live_app
 
 from . import data, i18n, native, ports
+from .files import sync_file
 from .settings import Device, Locations, Settings, atomic_write, save, update
 
 
@@ -375,6 +376,7 @@ def create_app(controller: Controller) -> FastAPI:
                 from uuid import uuid4
 
                 name = "import-" + uuid4().hex + ".foxbackup"
+                sync_file(archive)
                 archive.replace(controller.locations.backups / name)
             return {"name": name}
 
