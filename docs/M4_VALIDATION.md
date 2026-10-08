@@ -19,10 +19,10 @@ including settings, backup, Copy/Move/Use-existing, restore, import and unchange
 No global fsync disabling, directory-fsync workaround, new migration or domain/protocol change.
 
 New regressions exercise real platform flushes, preserved bytes, closed handles, failed staging
-flushes, failure-safe settings and source data, and flush-before-publication order. This environment
-is Linux: **native Windows retest and release packaging remain pending**, not inferred from these
-regressions. Required release-machine commands, using the same Windows Python/environment as the
-original failure:
+flushes, failure-safe settings and source data, and flush-before-publication order. These correction
+checks were performed on Linux, not native Windows. The subsequent maintainer report below confirms
+the native Windows filesystem failures are resolved; **release packaging remains pending**.
+Required release-machine commands, using the same Windows Python/environment as the original failure:
 
 ```powershell
 python -m pytest tests/test_operations.py -vv
@@ -54,6 +54,29 @@ Correction checks performed here (Linux):
 
 **Not executed here:** native Windows full-suite retest, Windows `build.ps1`, Inno Setup packaging
 and physical Windows acceptance. Linux bundle output is not a Windows release artifact.
+
+## Native Windows PTY type-check correction
+
+The maintainer subsequently reported **252 passed, 15 skipped, one upstream warning** on native
+Windows, confirming the filesystem failures are resolved. Ruff passed. The build stopped at strict
+mypy because the optional POSIX PTY test referenced `os.openpty` and `os.ttyname`, which are absent
+from Windows' `os` types despite the test's existing runtime skip marker.
+
+`test_serial_capture_through_os_device` now also checks `sys.platform == "win32"` and calls
+`pytest.skip` before defining/executing its POSIX implementation. Mypy recognizes this branch and
+its non-returning skip; the original POSIX runtime marker and actual capture assertions remain.
+A regression exercises the Windows skip branch on Linux. No FoxBridge production changes,
+type-checker setting changes, `type: ignore` additions or attribute-error suppressions.
+
+Strict mypy is checked against both the Linux host and `--platform win32`; the latter reproduces
+the reported errors before the fix and passes afterward. This is static Windows-target validation,
+not a native Windows build. The maintainer must rerun `packaging\windows\build.ps1` to establish
+progress through frozen-app/installer packaging. M3 physical Windows acceptance remains pending.
+
+Correction gates: complete Linux suite **268 passed, none skipped**, including all 14 Chromium
+workflows and real PTY capture; Ruff lint/format pass; strict mypy passes for Linux and Windows
+targets (also Windows/Python 3.13). All 518 reference hashes remain unchanged. The existing upstream
+Starlette warning remains visible. No production files or quality settings changed.
 
 ## Original M4 implementation checks (Linux)
 

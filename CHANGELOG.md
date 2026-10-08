@@ -1,5 +1,12 @@
 # Changelog
 
+## M4 maintenance — PTY test portability
+
+The optional POSIX serial-capture test now has a type-checker-visible Windows skip guard as well
+as its existing pytest platform marker. Strict mypy excludes unsupported `os.openpty`/`os.ttyname`
+calls when targeting Windows; the real PTY test remains active on POSIX. A regression verifies the
+Windows skip branch. No production behavior, type-checker settings or error suppressions changed.
+
 ## M4 maintenance — Windows filesystem durability
 
 Completed backup archives now reopen with a non-truncating `r+b` handle before `fsync`, fixing the

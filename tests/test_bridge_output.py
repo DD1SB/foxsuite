@@ -1,6 +1,7 @@
 import asyncio
 import os
 import select
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,6 +33,11 @@ def test_file_capture(tmp_path: Path) -> None:
     os.name != "posix", reason="Optional Unix serial capture; Windows does not depend on PTYs"
 )
 def test_serial_capture_through_os_device() -> None:
+    # The pytest marker handles runtime skipping; this guard also makes the POSIX-only
+    # implementation unreachable when mypy targets Windows.
+    if sys.platform == "win32":
+        pytest.skip("Windows does not support POSIX PTYs")
+
     async def check() -> None:
         master, slave = os.openpty()
         path = os.ttyname(slave)
@@ -52,6 +58,12 @@ def test_serial_capture_through_os_device() -> None:
             os.close(slave)
 
     asyncio.run(check())
+
+
+def test_serial_capture_skips_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    with pytest.raises(pytest.skip.Exception, match="Windows does not support POSIX PTYs"):
+        test_serial_capture_through_os_device()
 
 
 def test_serial_output_partial_write_is_failure() -> None:
