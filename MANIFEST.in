@@ -5,3 +5,5 @@ recursive-include src/foxcore *.typed
 recursive-include src/foxbridge *.typed
 recursive-include tests/fixtures *.json *.js
 recursive-include src/foxlive *.typed *.html *.js *.css *.json
+recursive-include src/foxops *.typed *.html *.js *.css *.json
+recursive-include packaging *.py *.ps1 *.iss *.spec

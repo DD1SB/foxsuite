@@ -4,7 +4,7 @@ const UI = FoxLiveUI, preference = (()=>{try{return localStorage;}catch{return {
 const $ = id => document.getElementById(id);
 const target = new URLSearchParams(location.search).get("event_id");
 const query = target ? `?event_id=${encodeURIComponent(target)}` : "";
-let catalogs, lang = UI.preferred(preference), state, connected = false, pending = false, again = false;
+let catalogs, lang = preference.getItem('foxlive.language') ? UI.preferred(preference) : document.body.dataset.defaultLanguage || 'en', state, connected = false, pending = false, again = false;
 const t = (key, values) => UI.translator(catalogs, lang)(key, values);
 const elapsed = value => value == null ? "—" : `${value >= 3600 ? Math.floor(value/3600)+":" : ""}${String(Math.floor(value%3600/60)).padStart(2,"0")}:${String(value%60).padStart(2,"0")}`;
 function table(headers, rows) {

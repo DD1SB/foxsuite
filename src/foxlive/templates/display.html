@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>FoxLive</title><link rel="stylesheet" href="/static/display.css"></head>
-<body>
+<body data-default-language="{{ operator_language }}">
 <header><div><h1 id="event-name">FoxLive</h1><p id="event-date"></p></div><div class="tools"><strong data-i18n="display.live">LIVE</strong><span id="updates" role="status"></span><label><span data-i18n="common.language">Language</span><select id="language"><option value="en">English</option><option value="de">Deutsch</option></select></label><button id="fullscreen" data-i18n="display.fullscreen">Fullscreen</button></div></header>
 <p id="summary"></p><p id="notice" role="status"></p>
 <main><section><h2 data-i18n="punch.recent">Recent punches</h2><div id="recent"></div></section><section><h2 data-i18n="ranking.heading">Rankings</h2><div id="rankings"></div></section></main>

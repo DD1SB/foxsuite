@@ -549,7 +549,7 @@ function connect() {
 }
 async function start() {
   const [en,de] = await Promise.all([api("/static/translations/en.json"),api("/static/translations/de.json")]);
-  catalogs = {en,de}; lang = UI.preferred(preferences); translatePage(); initCombos();
+  catalogs = {en,de}; lang = preferences.getItem('foxlive.language') ? UI.preferred(preferences) : document.body.dataset.defaultLanguage || 'en'; translatePage(); initCombos();
   workspace=new FoxLiveWorkspace({text:key=>t(key),eventChanged:id=>changeEvent(id).catch(error),preferences}); selected=workspace.initialEvent();
   // A remembered event is a convenience, never a prerequisite for starting a new database.
   const events=await api('/api/events');if(!events.some(e=>e.id===selected))selected=null;

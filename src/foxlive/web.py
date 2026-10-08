@@ -121,6 +121,9 @@ class Runtime:
     live: LiveService
     hub: Hub
     source_connected: bool | None = None
+    # Desktop operations own an optional source lifecycle; developer defaults are unchanged.
+    source_config: Config | None = None
+    source_enabled: bool | None = None
 
 
 async def source(runtime: Runtime, core: Config) -> None:
@@ -181,12 +184,14 @@ def create_app(
 
     def snapshot(event_id: int | None = None) -> dict[str, Any]:
         owner = current()
+        source_core = owner.source_config or core
+        enabled = serial_enabled if owner.source_enabled is None else owner.source_enabled
         return owner.live.snapshot(event_id) | {
             "application": {
-                "serial_enabled": serial_enabled,
-                "source_port": core.serial.port,
+                "serial_enabled": enabled,
+                "source_port": source_core.serial.port,
                 "source_connected": owner.source_connected,
-                "time_sync_enabled": core.time_sync.enabled and serial_enabled,
+                "time_sync_enabled": source_core.time_sync.enabled and enabled,
             }
         }
 
@@ -258,7 +263,14 @@ def create_app(
                     },
                     status_code=403,
                 )
-            if request.headers.get("content-type", "").split(";")[0] != "application/json":
+            content_type = request.headers.get("content-type", "").split(";")[0]
+            operations_upload = (
+                getattr(app.state, "operations", False)
+                and request.url.path == "/api/ops/import"
+                and request.method == "POST"
+                and content_type == "application/octet-stream"
+            )
+            if content_type != "application/json" and not operations_upload:
                 return JSONResponse(
                     {
                         "detail": presentation.translate(
@@ -335,13 +347,21 @@ def create_app(
     async def dashboard(event_id: int | None = None, section: str = "overview") -> HTMLResponse:
         return HTMLResponse(
             templates.get_template("desk.html").render(
-                snapshot=snapshot(event_id), t=presentation.translate
+                snapshot=snapshot(event_id),
+                t=presentation.translate,
+                operations=getattr(app.state, "operations", False),
+                operator_language=getattr(app.state, "operator_language", "en"),
             )
         )
 
     @app.get("/live/display", response_class=HTMLResponse)
     async def live_display() -> HTMLResponse:
-        return HTMLResponse(templates.get_template("display.html").render(t=presentation.translate))
+        return HTMLResponse(
+            templates.get_template("display.html").render(
+                t=presentation.translate,
+                operator_language=getattr(app.state, "operator_language", "en"),
+            )
+        )
 
     @app.get("/api/display")
     async def display(event_id: int | None = None) -> dict[str, Any]:
