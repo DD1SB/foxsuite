@@ -1,4 +1,4 @@
-# SQLite schema, version 5
+# SQLite schema, version 6
 
 M4 introduces **no database migration** and changes no core, bridge or live source/domain tables.
 Desktop storage is outside installation, at `%LOCALAPPDATA%\FoxSuite\data\foxsuite.db` by default.
@@ -90,7 +90,7 @@ Back up before opening with 0.3.0: older M1/M2 binaries reject schema 3. No down
 | live_events | Metadata, lifecycle/timing mode, canonical UTC windows/default start, persisted timestamp guards, source-ID cursor and UTC creation/update times |
 | live_categories | Event code/name/active/display order |
 | live_participants | Event bib/name/category, optional canonical UID/club/predefined start, active flag, optional operator status override, UTC creation/update times |
-| live_event_stations | Event Fox station ID/name/role/enabled/order; no SI codes |
+| live_event_stations | Event Fox station ID/name/CONTROL, START, BEACON or FINISH role/enabled/order; no SI codes |
 | live_event_punches | Explicit `(event_id,punch_id)` association FK to immutable FoxCore punch, cached canonical UID for lookup, UTC association time, origin live/recovery/historical |
 | live_punch_interpretations | Derived status, role, participant and reason per association |
 | live_results | Rebuildable typed JSON participant timing/control/status/rank cache |
@@ -205,3 +205,22 @@ manual adjudication inserts or edits a FoxCore raw event/punch.
 M4 online backup/restore and explicit copy/move workflows include all new tables
 automatically through SQLite backup, with the same durability/atomicity checks.
 The evidence JSON export supplements the database backup, not replaces it.
+
+## ARDF beacon correction — additive migration 6
+
+Migration 6 widens only the `live_event_stations.role` CHECK to allow CONTROL,
+START, BEACON and FINISH. SQLite requires a replacement table for a changed CHECK:
+rename the original temporarily, create the final table with the same name,
+columns/key/event FK, copy every row and drop the temporary original, inside the
+existing atomic migration transaction. No table references event stations. Existing station values, source facts, results, audit and evidence
+remain unchanged; migrations 1–5 are not rewritten. There is no singleton beacon
+constraint. Historical result JSON loads with `beacon_punched=false` when absent.
+
+BEACON is a distinct ARDF station role. It adds no controls and sets no finish
+time, but participates in M5 readout/evidence/reconciliation. Missing presence is
+not an automatic result failure; future event rules may require it without another
+role migration. FoxBridge's independent mapping role CHECK remains
+CONTROL/START/FINISH; no SPORTident beacon mapping is guessed.
+
+Existing schema 1–5 databases upgrade on open; binaries supporting at most schema
+5 reject schema 6. Backup/restore/copy continue to include the full database.

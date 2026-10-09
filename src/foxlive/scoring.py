@@ -105,6 +105,7 @@ def interpret(
         for e in entries
     }
     counted: dict[int, set[int]] = {e.id: set() for e in entries}
+    beacons: dict[int, set[int]] = {e.id: set() for e in entries}
     window_start, window_end = unix(event.competition_start_at), unix(event.competition_end_at)
     interpretations: list[Interpretation] = []
     for punch in sorted(punches, key=lambda p: (p.station_timestamp, p.id or 0)):
@@ -164,6 +165,14 @@ def interpret(
                     status = IS.REPEAT_FINISH
             elif result.finish is not None and time > result.finish:
                 status = IS.INVALID_FOR_TIMING
+            elif role == Role.BEACON:
+                status = (
+                    IS.REPEAT_BEACON if punch.station_id in beacons[entry.id] else IS.VALID_BEACON
+                )
+                beacons[entry.id].add(punch.station_id)
+                result.beacon_punched = True
+                if result.status == CS.REGISTERED:
+                    result.status = CS.RUNNING
             elif punch.station_id in counted[entry.id]:
                 status = IS.REPEAT_CONTROL
             else:

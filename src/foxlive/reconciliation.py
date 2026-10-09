@@ -145,11 +145,11 @@ def resolve(
 
 def observation(evidence: Evidence, resolution: Resolution) -> Observation:
     assert evidence.station_timestamp is not None
-    role_order = {Role.START: 0, Role.CONTROL: 1, Role.FINISH: 2}.get(
+    role_order = {Role.START: 0, Role.CONTROL: 1, Role.BEACON: 1, Role.FINISH: 2}.get(
         resolution.role or Role.CONTROL, 1
     )
     # Private, non-persisted sort keys: whole-second offline ties process START,
-    # CONTROL, FINISH in that order. Wide bands cannot collide with SQLite IDs;
+    # CONTROL/BEACON, FINISH in that order. Wide bands cannot collide with SQLite IDs;
     # all-live ties still use the original source-ID order as in M3.
     key = (
         evidence.source_id

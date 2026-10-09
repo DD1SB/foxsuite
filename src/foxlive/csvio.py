@@ -270,6 +270,7 @@ def export(service: LiveService, event_id: int, results: bool = False) -> str:
                 "recovered_controls",
                 "open_reviews",
                 "manual_decision",
+                "beacon_punched",
             ]
         )
         for result in DistinctControlsThenTime().calculate(service.repo.results(event_id)):
@@ -304,6 +305,7 @@ def export(service: LiveService, event_id: int, results: bool = False) -> str:
                         result.recovered_controls,
                         result.open_reviews,
                         result.manual_decision,
+                        result.beacon_punched,
                     ]
                 ]
             )

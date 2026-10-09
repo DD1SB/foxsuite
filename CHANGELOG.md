@@ -1,5 +1,32 @@
 # Changelog
 
+## M5 correction — ARDF finish beacon station role
+
+- Added distinct FoxLive CONTROL/START/BEACON/FINISH roles. BEACON represents the
+  ARDF finish beacon (Bake/Zielbake), separate from the finish line.
+- Additive migration 6 widens only the event station CHECK and preserves all existing
+  station records and migrations 1–5; no singleton beacon constraint.
+- VALID_BEACON/REPEAT_BEACON retain timestamps/history; source duplicates remain
+  SOURCE_DUPLICATE. Beacon never adds controls or sets start/finish/elapsed time.
+  Missing beacon does not invalidate results; future rule profiles can require it.
+- Reused M5 evidence primitives for matching/live-only/recovered/repeated beacon visits,
+  provenance, conservative discrepancies and reasoned MANUAL/selection/presence rulings.
+  Beacon conflicts keep live evidence without withholding START/FINISH timing.
+- EN/DE station editor/list, participant/history/review, finish-desk presence and recent
+  operator/public activity show Beacon/Bake distinctly. API/OpenAPI/WebSocket roles use
+  BEACON; result CSV appends beacon_punched without reordering existing columns.
+- Added domain, populated migration, API/DB, reconciliation/audit/recalculation/export,
+  EN/DE and Chromium regression coverage. Extended installed/frozen smoke with beacon
+  recovery. FoxBridge, reference firmware and sporting/category rules are unchanged.
+  Milestone 6 has not been started.
+
+Validation: 366 tests pass, including all 19 Chromium workflows; 22 new cases cover
+roles, scoring/timing/repeats, populated historical migration, API/DB/export, M5
+provenance/reconciliation/manual audit/recalculation and localized UI. Ruff lint/format,
+strict mypy (Linux and Windows targets), wheel/sdist, offline wheel installation and
+installed/Linux-frozen HTTP/WebSocket/beacon recovery/backup/restore/copy/restart
+smokes pass. Original migrations 1–5 and all 518 reference firmware hashes are unchanged.
+
 ## 0.5.0 — M5 offline DESFire readout and evidence reconciliation
 
 - Source-verified deployed eight-byte station file (uint32 LE time, uint16 LE event,

@@ -50,6 +50,7 @@ def display_state(service: LiveService, event_id: int | None = None) -> dict[str
                     "station_timestamp",
                     "station_name",
                     "station_id",
+                    "role",
                     "participant_id",
                     "start_number",
                     "first_name",

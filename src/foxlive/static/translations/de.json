@@ -461,7 +461,7 @@
   "review.error_reason": "Eine Entscheidung benötigt eine Begründung.",
   "review.error_action": "Diese Juryentscheidung wird nicht unterstützt.",
   "review.error_station": "Die Station muss für diese Veranstaltung aktiviert sein.",
-  "review.error_presence": "Die Zeit darf nur bei Füchsen ignoriert werden, nicht bei Start oder Ziel.",
+  "review.error_presence": "Die Zeit darf nur bei Füchsen oder Baken ignoriert werden, nicht bei Start oder Ziel.",
   "review.error_time": "Die manuelle Zeit liegt außerhalb der gültigen Zeitgrenzen der Veranstaltung.",
   "review.error_select": "Gültigen aktuellen Nachweis auswählen oder eine explizite manuelle Zeit eingeben.",
   "review.error_close": "Prüffälle sind noch offen. Schließen mit vorläufigen Ergebnissen bitte bestätigen.",
@@ -471,5 +471,17 @@
   "readout.error_scenario": "Dieses Ausleseszenario wird nicht unterstützt.",
   "audit.adjudication": "Entscheidung zu Nachweisen",
   "audit.status_adjudication": "Entscheidung zum Wettkampfstatus",
-  "audit.tag_readout": "RFID-Auslesung importiert"
+  "audit.tag_readout": "RFID-Auslesung importiert",
+  "station.BEACON": "Bake",
+  "station.finish_beacon": "Zielbake",
+  "station.beacon_help": "Ein ARDF-Wettkampf hat gewöhnlich eine Zielbake vor dem Zielkorridor. Sie wird getrennt von der Zielstation eingerichtet.",
+  "beacon.punch": "Bakenstempel",
+  "beacon.recovered": "Bake vom RFID-Tag ergänzt",
+  "beacon.present": "✓",
+  "beacon.missing": "fehlt",
+  "punch.VALID_BEACON": "Bakenstempel",
+  "punch.REPEAT_BEACON": "Bake erneut gestempelt",
+  "readout.completion": "Gefundene Füchse: {controls} · Bake: {beacon} · Ziel: {finish}",
+  "review.beacon_presence": "Bakenbesuch bestätigen, Zeit nicht verwenden",
+  "evidence.BEACON_PRESENCE": "Bakenbesuch ohne verlässliche Zeit bestätigt"
 }

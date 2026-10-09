@@ -45,7 +45,7 @@ ERROR_KEYS = {
     "Decision requires a reason": "review.error_reason",
     "Unsupported adjudication action": "review.error_action",
     "Station is not enabled for this event": "review.error_station",
-    "Presence-only decisions are allowed for controls only": "review.error_presence",
+    "Presence-only decisions are allowed for controls or beacons only": "review.error_presence",
     "Manual time fails event timestamp validation": "review.error_time",
     "Select valid current evidence or enter an explicit manual time": "review.error_select",
     "Open review cases remain; confirm close with provisional results": "review.error_close",

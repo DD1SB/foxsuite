@@ -170,8 +170,50 @@ new master edits/creation require unambiguous codes. IDs remain internal. These 
 preserve history even where reuse cannot yet be inferred. Back up before opening schema 4: earlier
 M3 binaries reject it and no destructive downgrade/automatic person merge is supplied.
 
-Event stations contain Fox station ID, display name, CONTROL/START/FINISH role, enabled flag/order.
+Event stations contain Fox station ID, display name, CONTROL/START/BEACON/FINISH role, enabled flag/order.
 Unconfigured/disabled stations remain visible but never score. No SPORTident control mapping exists.
+
+### ARDF finish beacon (Bake)
+
+BEACON is the ARDF finish beacon, distinct from the FINISH station at the finish line:
+field CONTROL stations → BEACON → finish corridor → FINISH. The editor offers Control,
+Start, Beacon, Finish; German labels are Fuchs / Kontrolle, Start, Bake, Ziel.
+An event ordinarily has one finish beacon, but multiple BEACON stations are allowed.
+Internal/API roles remain neutral enum values, including `BEACON`; localization is presentation only.
+
+The first valid visit at each beacon is VALID_BEACON; later legitimate visits at that
+same station are REPEAT_BEACON. Source retries remain SOURCE_DUPLICATE. Both visit
+types retain timestamps and provenance, follow existing event/UID/station/timing guards,
+and remain visible in history and evidence. Neither adds a normal CONTROL or defines
+start, finish or elapsed time. Three controls plus a beacon still mean three scored
+controls. FINISH remains the elapsed endpoint; ranking stays distinct controls descending,
+then elapsed ascending. A missing beacon does not invalidate a result or create a review.
+
+M5 matches live/tag beacon evidence, recovers valid tag-only beacons, retains live-only
+visits and reconciles later tag overwrites against any live revisit. Conflicting beacon
+times retain live visits provisionally and open the existing review case, as for CONTROL;
+they do not withhold START/FINISH timing. Manual beacon observations and explicit
+presence acceptance use the existing reasoned, audited workflow. Presence acceptance
+cannot set timing or increase controls. See [reconciliation](RECONCILIATION.md).
+
+The finish desk shows controls found, Bake/Beacon presence and Finish separately.
+Participant detail/history, review cases, station tables and recent operator/public
+activity identify the beacon distinctly; the public display adds no reconciliation detail.
+Result API/cache/CSV includes `beacon_punched` (any accepted valid beacon or explicit
+presence ruling). It is appended to the result CSV; prior columns retain their order.
+Detailed evidence JSON preserves `BEACON`, original timestamps and source references.
+REST station validation/serialization, OpenAPI role models and WebSocket snapshots
+accept/render `BEACON`. Old result payloads default beacon presence to false.
+
+Schema migration 6 only widens the FoxLive station CHECK; records and migrations 1–5
+are preserved. FoxBridge uses its own independent CONTROL/START/FINISH mapping enum
+and CHECK, unchanged; no FjwW beacon code or SPORTident station number is inferred.
+
+Future event rule profiles may require beacon presence using this role, without another
+station-role migration. This correction adds no course/championship rules engine.
+For domain context only, [IARU Region 1 ARDF Rules Part B (2025), §§27.8 and 29.1–29.4](https://www.iaru-r1.org/wp-content/uploads/2025/01/ARDF-Rules_B_2025.pdf)
+distinguish beacon registration at the corridor entrance from finish registration at
+the finish line. FoxLive scoring does not load or depend on that external document.
 
 ## Operator desk: language, registration and time inputs
 
@@ -260,6 +302,8 @@ INVALID_FOR_TIMING. Equal-second start/finish permits zero elapsed because sourc
 Additional START/FINISH are REPEAT_START/REPEAT_FINISH and never replace the timing pair. Controls
 before/missing start or after scoring finish are INVALID_FOR_TIMING. The first enabled CONTROL visit
 inside that interval is VALID_CONTROL; subsequent visits are REPEAT_CONTROL and remain visible.
+BEACON follows the same interval guards, with VALID_BEACON/REPEAT_BEACON and
+presence only; CONTROL count and the START/FINISH timing pair remain unchanged.
 
 PREDEFINED_START uses entry start, else event default, else no start. START punches cannot replace it
 and are repeat/ignored timing markers. FINISH still needs a known start. A first valid punch at/after
@@ -662,15 +706,15 @@ Ordinary live-only, exact matches, legitimate live revisits and synchronized
 correct-event tag-only recovery need no jury action. Tags store one overwritable
 file per station, not a full visit history. A missing tag file does not invalidate
 live evidence. Full conservative rules are in [RECONCILIATION](RECONCILIATION.md).
-Conflicting controls retain live scoring provisionally; conflicting START/FINISH
+Conflicting controls/beacons retain live scoring provisionally; conflicting START/FINISH
 times are withheld until adjudicated. Unsynchronized/invalid/event-mismatched or
 out-of-window data stays visible, not automatically timed or counted.
 
 **Review cases** shows participant, station and reason. Open a case to compare
 live/tag observations and their event IDs/validity. Choose valid current live/tag
-evidence, exclude the station, or explicitly accept CONTROL presence without a
+evidence, exclude the station, or explicitly accept CONTROL/BEACON presence without a
 trusted timestamp. Presence cannot define start/finish. **Add manual decision**
-can add a last-resort CONTROL, START or FINISH time using native local input and
+can add a last-resort CONTROL, START, BEACON or FINISH time using native local input and
 the existing DST choices; it creates MANUAL evidence, never a fake radio punch.
 DNS/DNF/DSQ and return-to-automatic status are available as reasoned jury actions.
 Every result-affecting decision requires a reason and confirmation, with optional
@@ -763,3 +807,27 @@ steps are documented for operator repetition; automated browser evidence is not
 misrepresented as a human hardware test. Remaining risks include actual AID and
 file access/provisioning, overwritten tag history, unreliable pre-sync time,
 reasoned jury mistakes, and long-running physical finish-desk operation.
+
+## M5 beacon correction validation
+
+- Complete Python 3.12 suite: **366 passed**, including **all 19 Chromium workflows**.
+  The correction adds 22 regression cases (20 domain/API/migration cases and two EN/DE
+  Chromium workflows); accepted M1–M5 tests remain passing.
+- Tests cover station/API/DB roundtrips and old-role compatibility, populated schema-5
+  migration with original station/source/result preservation, three controls plus beacon,
+  missing beacon, finish/start independence, repeats/transport duplicates, multiple beacons,
+  matching/live-only/tag recovery/later revisit/conflicting evidence, provenance, reasoned
+  manual/selection/presence/exclusion, deterministic recalculation/restart and exports.
+- EN/DE Chromium checks verify station selection/labels, finish-desk missing/recovered
+  presence, participant history and repeats, and operator/public recent beacon activity,
+  without raw enum leakage into ordinary UI.
+- Ruff lint/format and strict mypy for Linux and Windows targets pass (73 source/test files).
+  Wheel/sdist build and clean `--no-index` wheel installation from local cached dependencies
+  pass. Installed and Linux-frozen setup/assets/HTTP/WebSocket/beacon recovery/backup/
+  restore/copy/restart/shutdown smokes pass. These preserve the existing Windows/hardware
+  acceptance boundaries; no new physical-reader or Windows release acceptance is claimed.
+- Original migrations 1–5 remain identical and all **518 reference firmware hashes** match
+  the baseline. One existing upstream Starlette TestClient deprecation warning remains.
+
+ARDF beacon station role implemented. Existing CONTROL/START/FINISH semantics preserved.
+Milestone 6 has not been started.

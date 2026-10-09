@@ -22,6 +22,7 @@ class Timing(StrEnum):
 class Role(StrEnum):
     CONTROL = "CONTROL"
     START = "START"
+    BEACON = "BEACON"
     FINISH = "FINISH"
 
 
@@ -37,6 +38,8 @@ class CompetitionStatus(StrEnum):
 class InterpretationStatus(StrEnum):
     VALID_CONTROL = "VALID_CONTROL"
     REPEAT_CONTROL = "REPEAT_CONTROL"
+    VALID_BEACON = "VALID_BEACON"
+    REPEAT_BEACON = "REPEAT_BEACON"
     VALID_START = "VALID_START"
     REPEAT_START = "REPEAT_START"
     VALID_FINISH = "VALID_FINISH"
@@ -208,6 +211,7 @@ class Result(Model):
     start_number: int
     status: CompetitionStatus = CompetitionStatus.REGISTERED
     controls: int = 0
+    beacon_punched: bool = False
     start: int | None = None
     finish: int | None = None
     elapsed: int | None = None

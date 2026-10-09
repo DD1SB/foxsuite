@@ -29,7 +29,7 @@ function render() {
   const clock=timestamp => timestamp == null ? "—" : new Intl.DateTimeFormat(UI.locale(lang),{timeZone:zone,hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date(timestamp*1000));
   $("recent").replaceChildren(table(["time.local","station.label","participant.label","category.label"],state.recent.map(p=>[
     p.status==="INVALID_TIMESTAMP" ? t("time.unsynchronized") : clock(p.station_timestamp),
-    p.station_name || t("station.fallback",{number:p.station_id}),
+    (p.station_name || t("station.fallback",{number:p.station_id})) + (p.role === "BEACON" ? " · " + t("station.BEACON") : ""),
     p.participant_id ? `#${p.start_number} ${p.first_name} ${p.last_name}` : t("display.unknown"),
     state.categories.find(c=>c.id===p.category)?.code || p.category || "—"
   ])));

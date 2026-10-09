@@ -5,11 +5,93 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from test_live_browser import desk as desk
 
 from foxlive.readout import capture, station_record
 
 UID = "046365525C6180"
+
+
+@pytest.mark.parametrize("lang,label", [("en", "Beacon"), ("de", "Bake")])
+def test_beacon_station_finish_desk_history_and_live_display(
+    desk: Any, lang: str, label: str
+) -> None:
+    page, base, punch = desk
+    event, entry = configured(page)
+    page.locator("#language").select_option(lang)
+    page.locator('#sub-nav [data-view-link="stations"]').click()
+    role = page.locator('#station-form [name="role"]')
+    assert role.locator('option[value="BEACON"]').inner_text() == label
+    assert role.locator("option").evaluate_all("rows=>rows.map(r=>r.value)") == [
+        "CONTROL",
+        "START",
+        "BEACON",
+        "FINISH",
+    ]
+    page.locator('#station-form [name="station_id"]').fill("8")
+    page.locator('#station-form [name="display_name"]').fill("MO")
+    role.select_option(label=label)
+    page.locator("#station-form button").click()
+    page.wait_for_function(
+        "label=>[...document.querySelectorAll('#station-list tbody tr')].some(r=>r.cells[0].textContent==='8'&&r.cells[2].textContent===label)",
+        arg=label,
+    )
+    assert "BEACON" not in page.locator("#stations").inner_text()
+    punch(UID, 1)
+    sources = page.request.get("/api/source-punches").json()
+    stamp = sources[0]["station_timestamp"]
+    page.locator('#sub-nav [data-view-link="readout"]').click()
+    upload(page, [station_record(1, stamp, 1825)])
+    missing = "Bake: fehlt" if lang == "de" else "Beacon: missing"
+    assert missing in page.locator("#readout-result").inner_text()
+    upload(page, [station_record(1, stamp, 1825), station_record(8, stamp, 1825)])
+    assert f"{label}: ✓" in page.locator("#readout-result").inner_text()
+    assert ("Gefundene Füchse: 1" if lang == "de" else "Controls found: 1") in page.locator(
+        "#readout-result"
+    ).inner_text()
+    assert ("Ergänzt: 0" if lang == "de" else "Recovered: 0") in page.locator(
+        "#readout-result"
+    ).inner_text()
+    page.locator("#readout-result [data-detail]").click()
+    page.locator("#detail").wait_for(state="visible")
+    recovered = "Bake vom RFID-Tag ergänzt" if lang == "de" else "Beacon recovered from tag"
+    assert recovered in page.locator("#detail-body").inner_text()
+    assert "BEACON" not in page.locator("#detail-body").inner_text()
+    page.locator("#close-detail").click()
+    # The recovered beacon remains distinct when live visits subsequently arrive.
+    punch(UID, 8)
+    punch(UID, 8)
+    punch(UID, 11)
+    page.locator('#sub-nav [data-view-link="live"]').click()
+    page.wait_for_function(
+        "label=>document.querySelector('#recent').textContent.includes('MO · '+label)", arg=label
+    )
+    assert "BEACON" not in page.locator("#recent").inner_text()
+    page.locator("#recent [data-detail]").first.click()
+    page.locator("#detail").wait_for(state="visible")
+    history = page.locator("#detail-body table").first
+    assert f"MO · {label}" in history.inner_text()
+    assert any(
+        row[1] == f"MO · {label}" and row[2] == label
+        for row in history.locator("tbody tr").evaluate_all(
+            "rows=>rows.map(r=>[...r.cells].map(c=>c.textContent))"
+        )
+    )
+    assert ("Bake erneut gestempelt" if lang == "de" else "Repeat beacon") in history.inner_text()
+    assert "BEACON" not in page.locator("#detail-body").inner_text()
+    detail = page.request.get(f"/api/events/{event}/participants/{entry}").json()
+    assert detail["result"]["controls"] == 1 and detail["result"]["beacon_punched"]
+    page.locator("#close-detail").click()
+    public = page.context.new_page()
+    public.goto(f"{base}/live/display?event_id={event}")
+    public.locator("#language").select_option(lang)
+    public.wait_for_function(
+        "label=>document.querySelector('#recent').textContent.includes('MO · '+label)", arg=label
+    )
+    assert "BEACON" not in public.locator("body").inner_text()
+    assert UID not in public.locator("body").inner_text()
+    public.close()
 
 
 def configured(page: Any, uid: str | None = UID) -> tuple[int, int]:

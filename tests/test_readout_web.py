@@ -53,6 +53,9 @@ def test_readout_recovery_review_audit_export_and_restart(tmp_path: Path) -> Non
         detail = client.get(root + f"/participants/{entry}").json()
         assert detail["result"]["controls"] == 2 and detail["result"]["recovered_controls"] == 1
         assert session["summary"] == {
+            "controls_found": 2,
+            "beacon_punched": False,
+            "finish_punched": True,
             "live_controls": 1,
             "tag_controls": 2,
             "recovered": 1,

@@ -5,7 +5,7 @@ window.FoxLiveEvidence = (() => {
   const label=value=>t('evidence.'+value);
   const person=id=>snapshot.participants.find(p=>p.id===id);
   const personLabel=id=>{const p=person(id);return p?`#${p.start_number} ${p.first_name} ${p.last_name}`:t('rfid.unknown');};
-  const station=id=>snapshot.stations.find(s=>s.station_id===id)?.display_name || (id===-1?t('readout.session'):t('station.fallback',{number:id}));
+  const station=id=>{const s=snapshot.stations.find(s=>s.station_id===id);return (s?.display_name || (id===-1?t('readout.session'):t('station.fallback',{number:id})))+(s?.role==='BEACON'?' · '+t('station.BEACON'):'');};
   const options=(rows,value,label)=>rows.map(r=>`<option value="${value(r)}">${escape(label(r))}</option>`).join('');
   const names=r=>`${personLabel(r.participant_id)} · ${station(r.station_id)}`;
   function render() {
@@ -19,27 +19,28 @@ window.FoxLiveEvidence = (() => {
     const select=$('readout-participant'),old=select.value;
     select.innerHTML=`<option value="">${escape(t('rfid.choose_participant'))}</option>`+options(snapshot.participants.filter(p=>p.active),p=>p.id,p=>personLabel(p.id));select.value=old;
     // Retain operator timestamps/checks while live updates arrive.
-    const records=$('readout-records');if(records.dataset.event!==String(selected)){
-      records.dataset.event=String(selected);
-      records.innerHTML=snapshot.stations.filter(s=>s.enabled&&s.station_id<=255).map(s=>`<label><span><input type="checkbox" data-read-file="${s.station_id}"> ${escape(s.display_name)}</span><input type="datetime-local" step="1" data-record-time="${s.station_id}" value="${UI.localInput(new Date().toISOString(),zone())}"><select data-record-fold="${s.station_id}" hidden></select></label>`).join('');
+    const records=$('readout-records'),stations=JSON.stringify(snapshot.stations.map(s=>[s.station_id,s.display_name,s.role,s.enabled]));if(records.dataset.event!==String(selected)||records.dataset.stations!==stations){
+      records.dataset.event=String(selected);records.dataset.stations=stations;
+      records.innerHTML=snapshot.stations.filter(s=>s.enabled&&s.station_id<=255).map(s=>`<label><span><input type="checkbox" data-read-file="${s.station_id}"> ${escape(station(s.station_id))}</span><input type="datetime-local" step="1" data-record-time="${s.station_id}" value="${UI.localInput(new Date().toISOString(),zone())}"><select data-record-fold="${s.station_id}" hidden></select></label>`).join('');
     }
     if(imported && imported.event_id===selected) { const latest=snapshot.readouts.find(r=>r.id===imported.id); if(latest) imported={...imported,...latest}; renderImported(imported); }
+    if($('review-dialog').open)reviewAction();
     // The embedded event ID is advanced configuration, not a database primary key.
   }
   function renderImported(data) {
     const p=person(data.participant_id), summary=data.summary||{};
-    $('readout-result').innerHTML=`<h3>${escape(p?personLabel(p.id):t('rfid.unknown'))}</h3><p>${escape(t('readout.'+data.status))} · ${escape(t('readout.record_count',{count:data.records.length,failed:data.records.filter(r=>r.parse_status==='MALFORMED').length}))}</p><p>${escape(t('readout.summary',{live:summary.live_controls||0,tag:summary.tag_controls||0,recovered:summary.recovered||0,matches:summary.matches||0,reviews:summary.open_reviews||0}))}</p><p>${escape(t(summary.open_reviews||data.status!=='COMPLETE'||!p?'evidence.REVIEW_REQUIRED':'evidence.COMPLETE'))}</p>`+(p?`<button data-detail="${p.id}">${escape(t('participant.detail'))}</button>`:data.uid?`<p>${escape(data.uid)}</p><button data-unknown-readout="${escape(data.uid)}">${escape(t('rfid.assign_or_register'))}</button>`:'');
+    $('readout-result').innerHTML=`<h3>${escape(p?personLabel(p.id):t('rfid.unknown'))}</h3><p>${escape(t('readout.'+data.status))} · ${escape(t('readout.record_count',{count:data.records.length,failed:data.records.filter(r=>r.parse_status==='MALFORMED').length}))}</p><p>${escape(t('readout.summary',{live:summary.live_controls||0,tag:summary.tag_controls||0,recovered:summary.recovered||0,matches:summary.matches||0,reviews:summary.open_reviews||0}))}</p><p>${escape(t('readout.completion',{controls:summary.controls_found||0,beacon:t(summary.beacon_punched?'beacon.present':'beacon.missing'),finish:t(summary.finish_punched?'beacon.present':'beacon.missing')}))}</p><p>${escape(t(summary.open_reviews||data.status!=='COMPLETE'||!p?'evidence.REVIEW_REQUIRED':'evidence.COMPLETE'))}</p>`+(p?`<button data-detail="${p.id}">${escape(t('participant.detail'))}</button>`:data.uid?`<p>${escape(data.uid)}</p><button data-unknown-readout="${escape(data.uid)}">${escape(t('rfid.assign_or_register'))}</button>`:'');
     if(data.status!=='COMPLETE') $('readout-result').insertAdjacentHTML('beforeend',`<p>${escape(t('readout.retry'))}</p>`);
   }
   function detail(data) {
     const result=data.result;
-    return `<h3>${escape(t('review.evidence'))}</h3><p>${escape(label(result.completeness))} · ${escape(label(result.provenance))}</p>`+table(['station.label','review.outcome','review.evidence','common.actions'],data.evidence.map(r=>row([escape(station(r.station_id)),escape(label(r.status))+(r.needs_review?' · '+escape(label('REVIEW_REQUIRED')):'')+'<br>'+r.scored.map(s=>escape(t('punch.'+s.status))).join(' · ')+(r.presence_only?'<br>'+escape(label('PRESENCE')):''),r.evidence.map(e=>`${escape(label(e.source_type))} ${escape(time(e.station_timestamp))} · ${escape(label(e.validity))}`).join('<br>'),`<button data-review-station="${r.station_id}" data-entry="${data.participant.id}">${escape(t('review.open'))}</button>`])))+`<button data-manual-entry="${data.participant.id}">${escape(t('review.add_manual'))}</button>`+table(['time.local','history.operator','review.action','history.reason'],data.decisions.map(d=>row([escape(time(d.created_at)),escape(d.operator),escape(t('review.'+d.action)),escape(d.reason)])));
+    return `<h3>${escape(t('review.evidence'))}</h3><p>${escape(label(result.completeness))} · ${escape(label(result.provenance))}</p>`+table(['station.label','review.outcome','review.evidence','common.actions'],data.evidence.map(r=>row([escape(station(r.station_id)),escape(t(r.role==='BEACON'&&r.status==='TAG_ONLY_RECOVERED'?'beacon.recovered':'evidence.'+r.status))+(r.needs_review?' · '+escape(label('REVIEW_REQUIRED')):'')+'<br>'+r.scored.map(s=>escape(t('punch.'+s.status))).join(' · ')+(r.presence_only?'<br>'+escape(label(r.role==='BEACON'?'BEACON_PRESENCE':'PRESENCE')):''),r.evidence.map(e=>`${escape(label(e.source_type))} ${escape(time(e.station_timestamp))} · ${escape(label(e.validity))}`).join('<br>'),`<button data-review-station="${r.station_id}" data-entry="${data.participant.id}">${escape(t('review.open'))}</button>`])))+`<button data-manual-entry="${data.participant.id}">${escape(t('review.add_manual'))}</button>`+table(['time.local','history.operator','review.action','history.reason'],data.decisions.map(d=>row([escape(time(d.created_at)),escape(d.operator),escape(t(d.action==='PRESENCE'&&snapshot.stations.find(s=>s.station_id===d.station_id)?.role==='BEACON'?'review.beacon_presence':'review.'+d.action)),escape(d.reason)])));
   }
   async function openReview(resolution=null, entry=null) {
     currentReview=resolution;chosen=null;const form=$('review-form');form.reset();
     const participant=field(form,'participant_id');participant.innerHTML=options(snapshot.participants.filter(p=>p.active),p=>p.id,p=>personLabel(p.id));participant.value=String(resolution?.participant_id||entry||participant.value);
     const choices=snapshot.stations.filter(s=>s.enabled);if(resolution&&!choices.some(s=>s.station_id===resolution.station_id))choices.unshift({station_id:resolution.station_id,display_name:station(resolution.station_id)});
-    field(form,'station_id').innerHTML=options(choices,s=>s.station_id,s=>s.display_name);if(resolution)field(form,'station_id').value=String(resolution.station_id);
+    field(form,'station_id').innerHTML=options(choices,s=>s.station_id,s=>station(s.station_id));if(resolution)field(form,'station_id').value=String(resolution.station_id);
     field(form,'action').value=resolution?'SELECT':'MANUAL';
     $('review-evidence').innerHTML=resolution?`<h3>${escape(names(resolution))}</h3><p>${escape(resolution.issues.map(label).join(' · '))}</p>`+table(['review.evidence','time.local','review.issue','common.actions'],resolution.evidence.map((e,index)=>row([escape(label(e.source_type)),escape(time(e.station_timestamp)),escape(label(e.validity))+(e.tag_event_id!=null?'<br>'+escape(t('readout.event_comparison',{stored:e.tag_event_id,current:snapshot.event.tag_event_id??'—'})):''),e.validity==='VALID'&&e.source_type!=='MANUAL'?`<button type="button" data-select-evidence="${index}">${escape(t('review.use_evidence'))}</button>`:'']))):'';
     field(form,'timestamp').value=UI.localInput(new Date().toISOString(),zone());resetChoice(field(form,'timestamp'));reviewAction();
@@ -48,7 +49,8 @@ window.FoxLiveEvidence = (() => {
   function reviewAction() {
     const form=$('review-form'),action=field(form,'action'),role=snapshot.stations.find(s=>s.station_id===Number(field(form,'station_id').value))?.role;
     const isStatus=['DNS','DNF','DSQ','STATUS_AUTO'].includes(action.value);field(form,'station_id').parentElement.hidden=isStatus;field(form,'station_id').required=!isStatus;
-    for(const option of action.options)option.disabled=(option.value==='PRESENCE'&&role!=='CONTROL')||(['SELECT','MANUAL'].includes(option.value)&&!role);
+    for(const option of action.options)option.disabled=(option.value==='PRESENCE'&&!['CONTROL','BEACON'].includes(role))||(['SELECT','MANUAL'].includes(option.value)&&!role);
+    const presence=action.querySelector('[value="PRESENCE"]');presence.removeAttribute('data-i18n');presence.textContent=t(role==='BEACON'?'review.beacon_presence':'review.PRESENCE');
     if(action.selectedOptions[0]?.disabled)action.value='EXCLUDE';
     field(form,'timestamp').parentElement.hidden=action.value!=='MANUAL';
     field(form,'timestamp').required=action.value==='MANUAL';

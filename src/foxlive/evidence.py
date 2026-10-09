@@ -242,6 +242,20 @@ class EvidenceService:
 
     def _summary(self, rows: list[Resolution]) -> dict[str, Any]:
         return {
+            "controls_found": sum(
+                r.role == Role.CONTROL
+                and (r.presence_only or any(s["status"] == "VALID_CONTROL" for s in r.scored))
+                for r in rows
+            ),
+            "beacon_punched": any(
+                r.role == Role.BEACON
+                and (r.presence_only or any(s["status"] == "VALID_BEACON" for s in r.scored))
+                for r in rows
+            ),
+            "finish_punched": any(
+                r.role == Role.FINISH and any(s["status"] == "VALID_FINISH" for s in r.scored)
+                for r in rows
+            ),
             "live_controls": sum(
                 r.role == Role.CONTROL
                 and any(e.source_type == "LIVE" and e.validity == "VALID" for e in r.evidence)
@@ -461,7 +475,9 @@ class EvidenceService:
                 r.station_id for r in rows if any(s["status"] == "VALID_CONTROL" for s in r.scored)
             }
             for r in rows:
-                if r.presence_only and r.station_id not in counted:
+                if r.presence_only and r.role == Role.BEACON:
+                    result.beacon_punched = True
+                elif r.presence_only and r.role == Role.CONTROL and r.station_id not in counted:
                     counted.add(r.station_id)
                     result.controls += 1
             result.open_reviews = sum(r.needs_review for r in rows)
@@ -562,8 +578,12 @@ class EvidenceService:
             station is None or not station.enabled
         ):
             raise ValueError("Station is not enabled for this event")
-        if data.action == "PRESENCE" and station is not None and station.role != Role.CONTROL:
-            raise ValueError("Presence-only decisions are allowed for controls only")
+        if (
+            data.action == "PRESENCE"
+            and station is not None
+            and station.role not in {Role.CONTROL, Role.BEACON}
+        ):
+            raise ValueError("Presence-only decisions are allowed for controls or beacons only")
         # Build a new station's fingerprint before a manual-only decision, without source writes.
         uid = entry.uid or f"entry:{entry.id}"
         current = next(

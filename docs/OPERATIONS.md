@@ -461,7 +461,7 @@ foxsuite --db data/test.db live review resolve EVENT_ID ENTRY_ID STATION_ID SELE
 foxsuite --db data/test.db live review resolve EVENT_ID ENTRY_ID STATION_ID AUTO --reason "Return to automatic review"
 ```
 
-Use the browser for reasoned manual CONTROL/START/FINISH time or DNS/DNF/DSQ
+Use the browser for reasoned manual CONTROL/START/BEACON/FINISH time or DNS/DNF/DSQ
 rulings. Time pickers and DST occurrence choices preserve UTC source facts;
 manual evidence never overwrites an original timestamp. CONTROL presence-only
 acceptance counts a station explicitly without using untrusted time. Closing with
@@ -472,6 +472,30 @@ all prior milestones. Save configuration and ordinary CSV exports too; only the
 database is a full recovery source. Never live-copy the main DB without WAL or
 SQLite backup. Detailed evidence JSON preserves exact capture base64 and raw file
 bytes for disputes/parser improvements, but is not a full restore archive.
+
+### Finish beacon / Bake
+
+Configure the ARDF finish beacon as **Beacon / Bake**, separately from **Finish /
+Ziel**. Event station roles are CONTROL, START, BEACON and FINISH. The usual flow
+is field controls → finish beacon (Zielbake) → finish corridor → finish station.
+One beacon is ordinary; the editor/database also permit multiple beacon stations.
+
+Verify a live beacon appears as Beacon/Bake in recent activity and participant
+history. At Readout / Finish, check controls found, beacon presence and finish
+separately. Three controls plus a beacon must show three controls. The beacon
+timestamp stays available for audit, but only FINISH defines finish/elapsed time.
+TAG-only recovery shows **Beacon recovered from tag / Bake vom RFID-Tag ergänzt**;
+it does not add a recovered control. Later live visits remain repeat beacons, with
+transport retries classified separately. Matching tag/live beacons are confirmed;
+live-only evidence remains valid. Conflicts preserve live visits provisionally and
+open a review, without withholding finish timing as a FINISH conflict would.
+
+Manual beacon time/selection/exclusion and explicit presence without trusted time
+use the existing reason/operator/audit workflow. Beacon presence acceptance never
+counts a control. Missing beacon does not automatically invalidate a result; future
+rule profiles may require it. No new rules engine or mandatory-beacon setting exists.
+Upgrade applies additive migration 6; backup first because earlier binaries reject
+the new schema. FoxBridge mapping and reference firmware remain unchanged.
 
 ### Future physical offline readout acceptance — pending
 

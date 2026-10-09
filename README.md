@@ -163,10 +163,40 @@ Participant/master tables offer search and 50-row pages. **Open live display / L
 opens a separate read-only tab for monitor 2, with large results/punches, EN/DE, fullscreen and automatic
 reconnect. It shares scoring state, but excludes raw RFID, COM/debug and administrative controls.
 M3 assumes one trusted local operator process; non-local binding has no authentication and is unsafe
-on untrusted networks. Back up the DB and TOML before upgrading to migration 5; older binaries reject it.
+on untrusted networks. Back up the DB and TOML before upgrading to migration 6; older binaries reject it.
 Legacy registrations are preserved conservatively as separate runners with unknown birth data;
 legacy category names/codes need review. No identity is silently merged or birth information invented.
 See [FoxLive](docs/FOXLIVE.md) for complete rules, offline test workflow, API and Windows smoke checklist.
+
+### ARDF finish beacon / Bake
+
+FoxLive station roles are **CONTROL, START, BEACON, FINISH**. Configure the finish
+beacon as **Beacon / Bake** (Zielbake), distinct from **Finish / Ziel** at the end
+of the finish corridor. Valid and repeat beacon punches remain visible with their
+real timestamps; they add no normal controls and set no start/finish/elapsed time.
+Three controls plus a beacon still score three controls; sporting ranking stays
+controls descending, elapsed ascending. Missing beacon does not invalidate a result.
+
+M5 confirms matching live/tag beacons, recovers tag-only evidence, preserves live-only
+and repeat visits, and retains provenance/reviews for conflicts. Beacon conflicts
+keep valid live visits provisionally without withholding finish timing. Existing
+reasoned MANUAL/selection/presence rulings and audit apply. Readout / Finish,
+participant history, station tables and recent operator/public activity show
+Beacon/Bake distinctly; controls and recovered controls exclude beacons. APIs/OpenAPI/
+WebSockets use `BEACON`; result CSV appends `beacon_punched` with prior columns stable.
+
+Additive migration 6 widens only the FoxLive station-role CHECK, preserving existing
+records and migrations 1–5. Multiple beacons are allowed. FoxBridge's independent
+SPORTident mapping and reference firmware are unchanged. Future rule profiles may
+require beacon presence without another role migration; no new rules engine or
+Milestone 6 visual work is included. See [FoxLive](docs/FOXLIVE.md#ardf-finish-beacon-bake)
+and [reconciliation](docs/RECONCILIATION.md#ardf-beacon-evidence).
+
+Beacon correction validation: **366 tests passed, including all 19 Chromium workflows**
+(22 new cases, including two EN/DE browser workflows). Ruff lint/format, strict mypy
+for Linux and Windows targets, wheel/sdist build, clean offline wheel installation,
+and installed/Linux-frozen beacon recovery, HTTP/WebSocket, backup/restore/copy/restart
+smokes pass. All 518 reference firmware hashes remain unchanged.
 
 ### Offline readout and evidence (M5)
 

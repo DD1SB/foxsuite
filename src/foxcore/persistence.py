@@ -140,6 +140,17 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "CREATE TRIGGER evidence_decision_no_update BEFORE UPDATE ON live_evidence_decisions BEGIN SELECT RAISE(ABORT,'Decisions are append-only'); END",
         "CREATE TRIGGER evidence_decision_no_delete BEFORE DELETE ON live_evidence_decisions BEGIN SELECT RAISE(ABORT,'Decisions are append-only'); END",
     ),
+    (
+        # SQLite cannot widen a CHECK in place. No table references event stations.
+        # Keep migrations 1–5 and the independent FoxBridge role constraint intact.
+        "ALTER TABLE live_event_stations RENAME TO live_event_stations_before_beacon",
+        "CREATE TABLE live_event_stations (event_id INTEGER NOT NULL REFERENCES live_events(id), "
+        "station_id INTEGER NOT NULL, display_name TEXT NOT NULL, role TEXT NOT NULL "
+        "CHECK(role IN ('CONTROL','START','BEACON','FINISH')), enabled INTEGER NOT NULL, "
+        "display_order INTEGER NOT NULL, PRIMARY KEY(event_id,station_id))",
+        "INSERT INTO live_event_stations SELECT * FROM live_event_stations_before_beacon",
+        "DROP TABLE live_event_stations_before_beacon",
+    ),
 )
 
 

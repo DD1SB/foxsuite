@@ -214,7 +214,7 @@ def test_unsynchronized_control_presence_is_explicit_only(tmp_path: Path) -> Non
     assert live.repo.results(event)[0].controls == 0
     decision(live, event, participant, 1, "PRESENCE")
     assert live.repo.results(event)[0].controls == 1 and not live.evidence.reviews(event)
-    with pytest.raises(ValueError, match="controls only"):
+    with pytest.raises(ValueError, match="controls or beacons only"):
         decision(live, event, participant, 11, "PRESENCE")
     store.close()
 
@@ -266,7 +266,7 @@ def test_additive_migration_from_m4(tmp_path: Path) -> None:
         store = Store(path)
         store.close()
     store = Store(path)
-    assert store.version == 5
+    assert store.version == len(MIGRATIONS)
     assert store.db.execute("SELECT * FROM tag_readout_sessions").fetchall() == []
     store.close()
 

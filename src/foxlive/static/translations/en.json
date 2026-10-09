@@ -461,7 +461,7 @@
   "review.error_reason": "A decision requires a reason.",
   "review.error_action": "This adjudication action is not supported.",
   "review.error_station": "The station must be enabled for this event.",
-  "review.error_presence": "Ignoring the timestamp is only allowed for controls, not Start or Finish.",
+  "review.error_presence": "Ignoring the timestamp is only allowed for controls or beacons, not Start or Finish.",
   "review.error_time": "The manual time fails event timestamp or time-window validation.",
   "review.error_select": "Select valid current evidence, or enter an explicit manual time.",
   "review.error_close": "Open review cases remain. Confirm closing with provisional results.",
@@ -471,5 +471,17 @@
   "readout.error_scenario": "This readout scenario is not supported.",
   "audit.adjudication": "Evidence adjudication",
   "audit.status_adjudication": "Competition status ruling",
-  "audit.tag_readout": "Tag readout imported"
+  "audit.tag_readout": "Tag readout imported",
+  "station.BEACON": "Beacon",
+  "station.finish_beacon": "Finish beacon",
+  "station.beacon_help": "An ARDF event ordinarily has one finish beacon before the finish corridor. Configure it separately from the finish station.",
+  "beacon.punch": "Beacon punch",
+  "beacon.recovered": "Beacon recovered from tag",
+  "beacon.present": "✓",
+  "beacon.missing": "missing",
+  "punch.VALID_BEACON": "Beacon punch",
+  "punch.REPEAT_BEACON": "Repeat beacon",
+  "readout.completion": "Controls found: {controls} · Beacon: {beacon} · Finish: {finish}",
+  "review.beacon_presence": "Accept beacon presence, ignore timestamp",
+  "evidence.BEACON_PRESENCE": "Beacon presence accepted without trusting its time"
 }

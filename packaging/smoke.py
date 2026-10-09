@@ -115,27 +115,33 @@ def main() -> None:
                 },
             )
             # API uses PUT for station setup; this helper otherwise uses POST/GET.
-            request = Request(
-                base + root + "/stations/1",
-                method="PUT",
-                headers={"Content-Type": "application/json"},
-                data=json.dumps(
-                    {"station_id": 1, "display_name": "Fox 1", "role": "CONTROL"}
-                ).encode(),
-            )
-            with urlopen(request, timeout=5) as response:
-                assert response.status == 200
+            for station_id, name, role in [(1, "Fox 1", "CONTROL"), (8, "Bake", "BEACON")]:
+                request = Request(
+                    base + root + f"/stations/{station_id}",
+                    method="PUT",
+                    headers={"Content-Type": "application/json"},
+                    data=json.dumps(
+                        {"station_id": station_id, "display_name": name, "role": role}
+                    ).encode(),
+                )
+                with urlopen(request, timeout=5) as response:
+                    assert response.status == 200
+                    assert json.loads(response.read())["role"] == role
             session = api(
                 root + "/readouts/import",
                 {
                     "payload": capture(
-                        "046365525C6180", [station_record(1, int(time.time()), 1825)]
+                        "046365525C6180",
+                        [station_record(station, int(time.time()), 1825) for station in (1, 8)],
                     ).decode()
                 },
             )
             assert session["summary"]["recovered"] == 1
+            assert session["summary"]["beacon_punched"]
             result = api(root + f"/participants/{entry['id']}")["result"]
             assert result["controls"] == 1 and result["provenance"] == "RECOVERED"
+            assert result["beacon_punched"] and result["finish"] is None
+            assert result["elapsed"] is None
 
             async def sockets() -> None:
                 async with (

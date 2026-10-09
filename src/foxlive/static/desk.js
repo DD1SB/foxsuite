@@ -160,7 +160,7 @@ async function refresh() {
     }
   } catch (e) { error(e); } finally { refreshing = false; if (refreshAgain) { refreshAgain = false; schedule(); } }
 }
-const stationName = p => p.station_name || t("station.fallback", {number:p.station_id});
+const stationName = p => (p.station_name || t("station.fallback", {number:p.station_id})) + (p.role === "BEACON" ? " · " + t("station.BEACON") : "");
 const status = (prefix,value) => t(prefix + "." + (value || "PENDING_INTERPRETATION"));
 const technical = value => `<details><summary>${escape(t("debug.details"))}</summary><pre>${escape(JSON.stringify(value,null,2))}</pre></details>`;
 const categoryLabel = c => UI.categoryLabel(c,lang);
@@ -534,8 +534,8 @@ async function showDetail(id) {
   const event = selected, data = await api(requireEvent()+"/participants/"+id), p = data.participant, r = data.result;
   if (event !== selected || detailId !== id) return;
   const category = snapshot.categories.find(c => c.id === p.category_id);
-  $("detail-body").innerHTML = `<p>#${p.start_number} ${escape(p.first_name)} ${escape(p.last_name)} · ${escape(p.club)} · ${escape(categoryLabel(category))} · ${escape(p.uid || t("rfid.none"))} · ${escape(status("participant",r.status))} · ${escape(t("ranking.controls"))}: ${r.controls}</p><p>${escape(t("time.start"))}: ${escape(time(r.start))} · ${escape(t("time.finish"))}: ${escape(time(r.finish))} · ${escape(t("time.elapsed"))}: ${duration(r.elapsed)}</p>` +
-    table(["time.local","station.label","punch.status","history.reason","punch.signal"],data.history.map(v => row([escape(time(v.station_timestamp)),escape(stationName(v)),escape(status("punch",v.status)),escape(v.reason === "Predefined start remains authoritative" ? t("punch.predefined_reason") : v.reason),escape(v.rssi)]))) + (window.FoxLiveEvidence?.detail(data) || '');
+  $("detail-body").innerHTML = `<p>#${p.start_number} ${escape(p.first_name)} ${escape(p.last_name)} · ${escape(p.club)} · ${escape(categoryLabel(category))} · ${escape(p.uid || t("rfid.none"))} · ${escape(status("participant",r.status))} · ${escape(t("ranking.controls"))}: ${r.controls} · ${escape(t("station.BEACON"))}: ${escape(t(r.beacon_punched ? "beacon.present" : "beacon.missing"))}</p><p>${escape(t("time.start"))}: ${escape(time(r.start))} · ${escape(t("time.finish"))}: ${escape(time(r.finish))} · ${escape(t("time.elapsed"))}: ${duration(r.elapsed)}</p>` +
+    table(["time.local","station.label","station.role","punch.status","history.reason","punch.signal"],data.history.map(v => row([escape(time(v.station_timestamp)),escape(stationName(v)),escape(v.role ? status("station",v.role) : "—"),escape(status("punch",v.status)),escape(v.reason === "Predefined start remains authoritative" ? t("punch.predefined_reason") : v.reason),escape(v.rssi)]))) + (window.FoxLiveEvidence?.detail(data) || '');
 }
 $("close-detail").onclick = () => { detailId = null; $("detail").close(); };
 $('detail').addEventListener('cancel',()=>{detailId=null;});
