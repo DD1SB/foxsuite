@@ -34,8 +34,7 @@ def setup_desk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tupl
         fake.input.put_nowait(b'{"type":"time","timestamp":1791280800}\n')
         return fake
 
-    monkeypatch.setattr("foxops.web.SerialTransport", transport)
-    monkeypatch.setattr("foxlive.web.SerialTransport", transport)
+    monkeypatch.setattr("foxops.runtime.SerialTransport", transport)
     endpoint = socket.socket()
     endpoint.bind(("127.0.0.1", 0))
     endpoint.listen()
@@ -91,6 +90,8 @@ def finish(page: Any) -> None:
     page.locator("#next").click()
     page.locator("#finish").click()
     page.wait_for_url("**/")
+    page.locator("#control-title").wait_for()
+    page.locator("#open-live").click()
     page.locator('[data-view-link="diagnostics"]').wait_for()
 
 
@@ -155,3 +156,53 @@ def test_reidentified_device_requires_explicit_selection(
     assert page.locator("#port").input_value() == ""
     page.locator("#use-suggestion").click()
     assert page.locator("#port").input_value() == "COM5"
+
+
+def test_control_center_status_module_settings_and_navigation(
+    setup_desk: tuple[Any, Controller], tmp_path: Path
+) -> None:
+    page, controller = setup_desk
+    finish(page)
+    page.goto("/")
+    page.locator("#control-title").wait_for()
+    page.locator("#source-state").get_by_text("Connected", exact=True).wait_for()
+    assert page.locator("#source-state").inner_text() == "Connected"
+    assert page.locator("#bridge-state").inner_text() == "Not configured"
+    assert page.locator("#system-version").inner_text()
+    page.locator("#language").select_option("de")
+    assert page.locator("#control-title").inner_text() == "Kontrollzentrum"
+    page.goto("/settings#bridge")
+    page.locator("#bridge-save").wait_for(state="visible")
+    page.locator("#bridge-type").select_option("file")
+    page.locator("#bridge-path").fill(str(tmp_path / "bridge.bin"))
+    page.locator("#bridge-enabled").check()
+    page.locator("#bridge-save").click()
+    page.wait_for_function(
+        "() => document.querySelector('#message').textContent.includes('gespeichert')"
+    )
+    assert load(controller.locations).bridge.enabled
+    page.locator("#mapping-uid").fill("046365525C6180")
+    page.locator("#mapping-card").fill("912345")
+    page.locator("#uid-map-form button").click()
+    page.locator("#bridge-mappings").get_by_text("046365525C6180 → 912345").wait_for()
+    page.locator("#mapping-station").fill("1")
+    page.locator("#mapping-control").fill("31")
+    page.locator("#station-map-form button").click()
+    page.locator("#bridge-mappings").get_by_text("1 → 31 (CONTROL)").wait_for()
+    page.goto("/")
+    page.locator("#bridge-state").get_by_text("Läuft", exact=True).wait_for()
+    page.locator("#bridge-toggle").click()
+    page.locator("#bridge-state").get_by_text("Gestoppt", exact=True).wait_for()
+    assert not load(controller.locations).bridge.enabled
+    page.locator("#bridge-toggle").click()
+    page.locator("#bridge-state").get_by_text("Läuft", exact=True).wait_for()
+    page.locator("#reconnect").click()
+    page.locator("#source-state").get_by_text("Verbunden", exact=True).wait_for()
+    page.locator("#diagnostics").click()
+    page.locator("#diagnostic-panel[open]").wait_for()
+    assert page.locator("#diagnostic-panel").get_attribute("open") is not None
+    assert "timesync" in page.locator("#diagnostic-entries").inner_text()
+    page.locator("#open-live").click()
+    page.locator("h1").get_by_text("FoxLive", exact=True).wait_for()
+    page.locator('#top-nav a[href="/"]').click()
+    page.locator("#control-title").get_by_text("Kontrollzentrum").wait_for()

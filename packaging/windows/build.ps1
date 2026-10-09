@@ -7,13 +7,42 @@ if ($env:OS -ne "Windows_NT") { throw "Build Windows installers on Windows." }
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 
 function Test-SupportedPython {
-    param([string]$Executable, [string[]]$Prefix = @())
+    param([string]$Executable)
     try {
-        $result = & $Executable @Prefix -c 'import sys; print("yes" if sys.version_info >= (3, 12) and sys.maxsize > 2**32 else "no")' 2>$null
-        return ($LASTEXITCODE -eq 0 -and $result -eq "yes")
+        $null = & $Executable -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) and sys.maxsize == 2**63 - 1 else 1)' 2>$null
+        return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
     }
+}
+
+function Find-SupportedPython {
+    param([string]$Requested)
+    $candidates = if ($Requested) { @($Requested) } else { @("python.exe", "python3.exe") }
+    foreach ($candidate in $candidates) {
+        $command = Get-Command -Name $candidate -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($command -and (Test-SupportedPython -Executable $command.Source)) {
+            return $command.Source
+        }
+    }
+    # The launcher is optional and only discovers a real interpreter. It never
+    # creates the venv or runs any build step.
+    if (-not $Requested) {
+        $launcher = Get-Command -Name "py.exe" -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($launcher) {
+            try {
+                $executable = & $launcher.Source -3 -c 'import sys; print(sys.executable)' 2>$null
+                if ($LASTEXITCODE -eq 0 -and (Test-SupportedPython -Executable $executable)) {
+                    return $executable
+                }
+            } catch {
+                # Missing/broken launcher installations do not change the requirements.
+            }
+        }
+    }
+    throw "64-bit Python 3.12+ was not found. Install Python with python.exe on PATH or pass -Python PATH_TO_PYTHON_EXE."
 }
 
 function Find-InnoCompiler {
@@ -44,28 +73,7 @@ Push-Location $ProjectRoot
 try {
     # The interpreter is only used to create the isolated environment. All
     # package installation, checks and bundling use that environment's Python.
-    if ($Python) {
-        $candidates = @([pscustomobject]@{ Executable = $Python; Prefix = @() })
-    } else {
-        $candidates = @(
-            [pscustomobject]@{ Executable = "py"; Prefix = @("-3") }
-            [pscustomobject]@{ Executable = "python"; Prefix = @() }
-            [pscustomobject]@{ Executable = "python3"; Prefix = @() }
-        )
-    }
-    $selected = $null
-    foreach ($candidate in $candidates) {
-        if (-not (Get-Command -Name $candidate.Executable -CommandType Application -ErrorAction SilentlyContinue)) {
-            continue
-        }
-        if (Test-SupportedPython -Executable $candidate.Executable -Prefix $candidate.Prefix) {
-            $selected = $candidate
-            break
-        }
-    }
-    if (-not $selected) {
-        throw "64-bit Python 3.12+ was not found. Install it or pass -Python PATH_TO_PYTHON_EXE."
-    }
+    $BasePython = Find-SupportedPython -Requested $Python
     $IsccCommand = Find-InnoCompiler -Requested $Iscc
 
     $BuildVenv = Join-Path $ProjectRoot ".venv-windows-build"
@@ -74,9 +82,7 @@ try {
         if (Test-Path -LiteralPath $BuildVenv) {
             throw "Incomplete build environment at $BuildVenv. Remove that directory and rerun the build."
         }
-        $BasePython = $selected.Executable
-        $BaseArgs = $selected.Prefix
-        & $BasePython @BaseArgs -m venv $BuildVenv
+        & $BasePython -m venv $BuildVenv
         if ($LASTEXITCODE -ne 0) { throw "Could not create build environment at $BuildVenv." }
     }
     if (-not (Test-SupportedPython -Executable $BuildPython)) {
@@ -92,11 +98,7 @@ try {
 
     & $BuildPython -m pip install --upgrade pip
     if ($LASTEXITCODE -ne 0) { throw "Could not upgrade pip in the build environment." }
-    # Python 3.12+ no longer installs setuptools into new venvs by default.
-    # These are also declared in pyproject.toml for the no-isolation build.
-    & $BuildPython -m pip install --upgrade "setuptools>=69" "wheel>=0.42" "build>=1"
-    if ($LASTEXITCODE -ne 0) { throw "Could not install the package build backend and tools." }
-    & $BuildPython -m pip install -e ".[dev,ui-test,windows-build]"
+    & $BuildPython -m pip install -e ".[dev]"
     if ($LASTEXITCODE -ne 0) { throw "Could not install FoxSuite build/test dependencies." }
 
     & $BuildPython -m pytest -q
@@ -111,8 +113,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Package build failed" }
     & $BuildPython -m PyInstaller --noconfirm packaging\windows\foxsuite.spec
     if ($LASTEXITCODE -ne 0) { throw "Frozen build failed" }
-    & dist\FoxSuite\foxsuite-cli.exe --help
-    if ($LASTEXITCODE -ne 0) { throw "Frozen CLI smoke failed" }
+    # The venv's smoke runner checks both frozen executables, including CLI --help.
     & $BuildPython packaging\smoke.py --desktop dist\FoxSuite\FoxSuite.exe --cli dist\FoxSuite\foxsuite-cli.exe
     if ($LASTEXITCODE -ne 0) { throw "Frozen desktop HTTP/WebSocket/backup smoke failed" }
     & $IsccCommand packaging\windows\foxsuite.iss

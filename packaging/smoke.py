@@ -70,6 +70,7 @@ def main() -> None:
             for asset in (
                 "/setup",
                 "/ops/static/settings.js",
+                "/ops/static/control.js",
                 "/ops/static/en.json",
                 "/ops/static/de.json",
                 "/static/desk.js",
@@ -83,6 +84,36 @@ def main() -> None:
                 {"port": "SIMULATED-NO-HARDWARE", "http_port": port, "language": "de"},
             )
             assert load(locations).completed and load(locations).language == "de"
+            with urlopen(base + "/", timeout=5) as response:
+                assert b"Control Center" in response.read()
+            suite = api("/api/ops/status")
+            assert suite["product"] == "FoxSuite" and suite["pid"] == process.pid
+            assert suite["process_model"] == "single_process"
+            capture_path = Path(folder) / "bridge-capture.bin"
+            api(
+                "/api/ops/bridge",
+                {
+                    "enabled": True,
+                    "output_type": "file",
+                    "path": str(capture_path),
+                    "timezone": "Europe/Berlin",
+                },
+            )
+            wait(lambda: api("/api/ops/status")["bridge"]["output_connected"])
+            api("/api/ops/bridge/state", {"running": False})
+            assert not api("/api/ops/status")["bridge"]["running"]
+            # Closed output handles must permit a Windows file rename too.
+            temporary_capture = capture_path.with_suffix(".closed")
+            capture_path.replace(temporary_capture)
+            temporary_capture.replace(capture_path)
+            api("/api/ops/bridge/state", {"running": True})
+            before_restart = api("/api/ops/status")["started_at"]
+            api("/api/ops/restart", {})
+            wait(lambda: api("/api/ops/status")["started_at"] != before_restart)
+            suite = api("/api/ops/status")
+            assert suite["pid"] == process.pid and suite["bridge"]["enabled"]
+            wait(lambda: api("/api/ops/status")["bridge"]["output_connected"])
+            assert capture_path.stat().st_size == 0
             event = api(
                 "/api/events",
                 {
@@ -178,6 +209,7 @@ def main() -> None:
                 stderr=subprocess.DEVNULL,
             )
             wait(lambda: api("/api/ops/settings")["completed"] is True)
+            wait(lambda: api("/api/ops/status")["bridge"]["output_connected"])
             assert len(api("/api/events")) == 1 and api("/api/source-punches") == []
             assert api(root + f"/participants/{entry['id']}")["result"] == result
             api("/api/ops/shutdown", {})
@@ -187,7 +219,7 @@ def main() -> None:
                 process.terminate()
                 process.wait(timeout=20)
     print(
-        "Desktop setup, offline assets, HTTP/WebSockets, M5 recovery, backup/restore, copy, restart and shutdown: PASS"
+        "FoxSuite Control Center, owned runtime/Bridge restart, offline assets, HTTP/WebSockets, M5 recovery, backup/restore, copy and shutdown: PASS"
     )
 
 

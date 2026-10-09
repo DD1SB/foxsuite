@@ -1,4 +1,4 @@
-"""Local operator setup/settings composed around the existing FoxLive lifespan."""
+"""FoxSuite Control Center and persistent operator settings on the shared HTTP server."""
 
 import asyncio
 import json
@@ -6,7 +6,8 @@ import logging
 import shutil
 import tempfile
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -15,16 +16,17 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 
-from foxcore.config import SerialConfig
-from foxcore.events import ConnectionEvent, TimeSyncEvent
-from foxcore.serial import SerialTransport
-from foxcore.timesync import TimeSyncService
+from foxbridge.cli import validate_output
+from foxbridge.config import BridgeConfig
+from foxbridge.mapping import MappingRepository, Role
+from foxbridge.persistence import DeliveryRepository
 from foxlive.models import Model
-from foxlive.web import Runtime, source
+from foxlive.web import Runtime
 from foxlive.web import create_app as live_app
 
 from . import data, i18n, native, ports
 from .files import sync_file
+from .runtime import FoxSuiteRuntime
 from .settings import Device, Locations, Settings, atomic_write, save, update
 
 
@@ -55,13 +57,45 @@ class RestoreInput(Model):
     confirmed: bool = False
 
 
+class BridgeInput(Model):
+    enabled: bool = False
+    target: str = Field(default="fjww", min_length=1, max_length=100)
+    output_type: Literal["serial", "file"] = "serial"
+    port: str = Field(default="", max_length=300)
+    baud_rate: int = Field(default=38400, ge=1, le=4000000)
+    path: str = Field(default="", max_length=1000)
+    timezone: str = Field(default="UTC", min_length=1, max_length=100)
+    week_counter: int = Field(default=0, ge=0, le=3)
+
+
+class BridgeStateInput(Model):
+    running: bool
+
+
+class UIDInput(Model):
+    uid: str = Field(min_length=1, max_length=64)
+
+
+class UIDMappingInput(UIDInput):
+    card_number: int = Field(ge=1, le=0xFFFFFF)
+
+
+class StationInput(Model):
+    station_id: int = Field(ge=0, le=65535)
+
+
+class StationMappingInput(StationInput):
+    control_code: int = Field(ge=1, le=1023)
+    role: Role = Role.CONTROL
+
+
 class Controller:
     def __init__(
         self, locations: Locations, settings: Settings, restart: Callable[[], None]
     ) -> None:
         self.locations, self.settings, self.restart = locations, settings, restart
         self.owner: Runtime | None = None
-        self.task: asyncio.Task[None] | None = None
+        self.supervisor: FoxSuiteRuntime | None = None
         self.lock = asyncio.Lock()
         self.pending: Callable[[], None] | None = None
         self.result: str | None = None
@@ -73,20 +107,15 @@ class Controller:
         return self.owner
 
     async def stop_source(self) -> None:
-        task, self.task = self.task, None
-        if task is not None:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
-        self.runtime().source_enabled = False
+        await self.application().stop_source()
 
     def start_source(self) -> None:
-        owner = self.runtime()
-        owner.source_config = self.settings.core
-        confirmation = self.identity_confirmation()
-        owner.source_enabled = self.settings.completed and not confirmation
-        if owner.source_enabled:
-            self.task = asyncio.create_task(source(owner, self.settings.core))
+        self.application().start_source(self.identity_confirmation())
+
+    def application(self) -> FoxSuiteRuntime:
+        if self.supervisor is None:
+            raise ValueError("FoxSuite is not started")
+        return self.supervisor
 
     def identity_confirmation(self) -> bool:
         device = self.settings.device
@@ -117,57 +146,24 @@ class Controller:
         """One bounded probe, preserving *all* received lines using the accepted reader."""
         async with self.lock:
             self.writable()
-            await self.stop_source()
-            owner = self.runtime()
-            transport = SerialTransport(SerialConfig(value.port, value.baud_rate))
-            sync = TimeSyncService(
-                transport,
-                self.settings.core.time_sync,
-                lambda event: owner.store.diagnostic("timesync", json.dumps(event.__dict__)),
-            )
-            connected: asyncio.Future[ConnectionEvent] = asyncio.get_running_loop().create_future()
-            first = owner.store.db.execute("SELECT COALESCE(MAX(id),0) FROM raw_events").fetchone()[
-                0
-            ]
-
-            async def state(event: ConnectionEvent) -> None:
-                if not connected.done():
-                    connected.set_result(event)
-
-            async def line(raw: bytes) -> None:
-                owner.ingest.ingest(raw, "serial:" + value.port)
-
-            task = asyncio.create_task(transport.run(line, state))
             try:
-                connection = await asyncio.wait_for(asyncio.shield(connected), 5)
-                if not connection.connected:
-                    return {"opened": False, "time_sent": False, "detail": "port_unavailable"}
-                await asyncio.sleep(delay)  # Board startup; reads continue during this wait.
-                event: TimeSyncEvent = await sync.send_now()
-                await asyncio.sleep(delay)
-                if task.done():
-                    task.result()  # Surface raw persistence failure, not a false success.
-                observed = [
-                    row[0]
-                    for row in owner.store.db.execute(
-                        "SELECT DISTINCT event_type FROM raw_events WHERE id>?", (first,)
-                    )
-                ]
-                return {"opened": True, "time_sent": event.success, "observed_types": observed}
-            except TimeoutError:
-                return {"opened": False, "time_sent": False, "detail": "port_unavailable"}
+                return await self.application().probe(value.port, value.baud_rate, delay)
             finally:
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
-                await sync.stop()
-                await transport.disconnect()
-                self.start_source()
+                application = self.application()
+                if application.source_task is None or application.source_task.done():
+                    self.start_source()
 
 
 def create_app(controller: Controller) -> FastAPI:
     settings = controller.settings
-    app = live_app(settings.core.database_path, settings.core, settings.live, serial_enabled=False)
+    app = live_app(
+        settings.core.database_path,
+        settings.core,
+        settings.live,
+        serial_enabled=False,
+        runtime_factory=controller.runtime,
+    )
+    app.title = "FoxSuite"
     app.state.operations = True
     app.state.operator_language = settings.language
     app.state.controller = controller
@@ -202,14 +198,16 @@ def create_app(controller: Controller) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        async with original(application):
-            controller.owner = cast(Runtime, app.state.runtime)
-            controller.start_source()
-            try:
+        supervisor = FoxSuiteRuntime(controller.settings)
+        controller.supervisor, controller.owner = supervisor, supervisor.owner
+        application.state.supervisor = supervisor
+        try:
+            async with original(application):
+                await supervisor.start(controller.identity_confirmation())
                 yield
-            finally:
-                await controller.stop_source()
-                controller.owner = None
+        finally:
+            await supervisor.close()
+            controller.owner, controller.supervisor = None, None
 
     app.router.lifespan_context = lifespan
 
@@ -220,6 +218,169 @@ def create_app(controller: Controller) -> FastAPI:
         if controller.restarting and request.method not in {"GET", "HEAD", "OPTIONS"}:
             return JSONResponse({"detail": "FoxSuite is restarting; wait for it to reconnect"}, 503)
         return await call_next(request)
+
+    # Replace only the desktop landing route; all FoxLive routes/middleware stay on this app.
+    app.router.routes = [
+        route for route in app.router.routes if getattr(route, "path", None) != "/"
+    ]
+
+    @app.get("/", response_class=HTMLResponse)
+    async def control_center() -> HTMLResponse:
+        return HTMLResponse((assets / "control.html").read_text(encoding="utf-8"))
+
+    @app.get("/api/ops/status")
+    async def runtime_status() -> dict[str, Any]:
+        return controller.application().status() | {
+            "system": {
+                "database": str(controller.settings.core.database_path),
+                "settings": str(controller.locations.settings),
+                "logs": str(controller.locations.logs),
+                "backups": str(controller.locations.backups),
+                "override": controller.settings.override,
+                "language": controller.settings.language,
+                "restarting": controller.restarting,
+                "last_operation": controller.result,
+            },
+            "identity_confirmation": controller.identity_confirmation(),
+        }
+
+    @app.get("/api/ops/diagnostics")
+    async def diagnostics() -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in controller.runtime().store.db.execute(
+                "SELECT id,created_at,kind,detail FROM diagnostics ORDER BY id DESC LIMIT 50"
+            )
+        ]
+
+    @app.post("/api/ops/reconnect")
+    async def reconnect_source() -> dict[str, bool]:
+        async with controller.lock:
+            if controller.restarting:
+                raise ValueError("FoxSuite is restarting; wait for it to reconnect")
+            await controller.stop_source()
+            controller.start_source()
+            return {"reconnecting": bool(controller.runtime().source_enabled)}
+
+    @app.post("/api/ops/restart")
+    async def restart_runtime() -> dict[str, bool]:
+        async with controller.lock:
+            if controller.restarting:
+                raise ValueError("FoxSuite is restarting; wait for it to reconnect")
+            controller.pending, controller.restarting = lambda: None, True
+            asyncio.get_running_loop().call_later(0.3, controller.restart)
+            return {"restarting": True}
+
+    @app.get("/api/ops/bridge")
+    async def bridge_settings() -> dict[str, Any]:
+        config = controller.settings.bridge
+        return {
+            "enabled": config.enabled,
+            "target": config.target,
+            "output_type": config.output.type,
+            "port": config.output.port,
+            "baud_rate": config.output.baud_rate,
+            "path": str(config.output.path)
+            if config.output.path.is_absolute()
+            else str(controller.settings.core.database_path.parent / "bridge-capture.bin"),
+            "timezone": config.sportident.timezone,
+            "week_counter": config.sportident.week_counter,
+        }
+
+    @app.get("/api/ops/bridge/deliveries")
+    async def deliveries() -> list[dict[str, Any]]:
+        return DeliveryRepository(controller.runtime().store).list_deliveries(
+            controller.settings.bridge.target, 50
+        )
+
+    @app.get("/api/ops/bridge/mappings")
+    async def mappings() -> dict[str, Any]:
+        repository = MappingRepository(controller.runtime().store)
+        return {
+            "uids": [asdict(item) for item in repository.list_uids()],
+            "stations": [asdict(item) for item in repository.list_stations()],
+        }
+
+    @app.post("/api/ops/bridge/mappings/uid")
+    async def uid_mapping(value: UIDMappingInput) -> dict[str, Any]:
+        async with controller.lock:
+            controller.writable()
+            return asdict(
+                MappingRepository(controller.runtime().store).add_uid(value.uid, value.card_number)
+            )
+
+    @app.post("/api/ops/bridge/mappings/station")
+    async def station_mapping(value: StationMappingInput) -> dict[str, Any]:
+        async with controller.lock:
+            controller.writable()
+            return asdict(
+                MappingRepository(controller.runtime().store).add_station(
+                    value.station_id, value.control_code, value.role
+                )
+            )
+
+    @app.post("/api/ops/bridge/mappings/uid/remove")
+    async def remove_uid(value: UIDInput) -> dict[str, bool]:
+        async with controller.lock:
+            controller.writable()
+            MappingRepository(controller.runtime().store).remove_uid(value.uid)
+            return {"removed": True}
+
+    @app.post("/api/ops/bridge/mappings/station/remove")
+    async def remove_station(value: StationInput) -> dict[str, bool]:
+        async with controller.lock:
+            controller.writable()
+            MappingRepository(controller.runtime().store).remove_station(value.station_id)
+            return {"removed": True}
+
+    @app.post("/api/ops/bridge")
+    async def configure_bridge(value: BridgeInput) -> dict[str, bool]:
+        async with controller.lock:
+            controller.writable()
+            previous = controller.settings.bridge
+            config = BridgeConfig(
+                enabled=value.enabled,
+                target=value.target,
+                queue_capacity=previous.queue_capacity,
+                output=replace(
+                    previous.output,
+                    type=value.output_type,
+                    port=value.port.strip(),
+                    baud_rate=value.baud_rate,
+                    path=Path(value.path) if value.path else previous.output.path,
+                ),
+                sportident=replace(
+                    previous.sportident, timezone=value.timezone, week_counter=value.week_counter
+                ),
+            )
+            if config.enabled or config.output.port or config.output.type == "file":
+                validate_output(config, controller.settings.core)
+            updated = replace(controller.settings, bridge=config)
+            save(controller.locations, updated)
+            controller.settings = updated
+            await controller.application().configure(updated, controller.identity_confirmation())
+            return {"saved": True}
+
+    @app.post("/api/ops/bridge/state")
+    async def bridge_state(value: BridgeStateInput) -> dict[str, bool]:
+        async with controller.lock:
+            if controller.restarting:
+                raise ValueError("FoxSuite is restarting; wait for it to reconnect")
+            config = replace(controller.settings.bridge, enabled=value.running)
+            if value.running:
+                if not controller.settings.completed:
+                    raise ValueError("Complete first-run setup before starting FoxBridge")
+                validate_output(config, controller.settings.core)
+            updated = replace(controller.settings, bridge=config)
+            if not updated.override:
+                save(controller.locations, updated)
+            controller.settings = updated
+            application = controller.application()
+            await application.stop_bridge()
+            application.settings = updated
+            application.bridge_error = None
+            application.start_bridge()
+            return {"running": value.running}
 
     @app.get("/setup", response_class=HTMLResponse)
     @app.get("/settings", response_class=HTMLResponse)
@@ -282,6 +443,8 @@ def create_app(controller: Controller) -> FastAPI:
                 else Device()
             )
             updated = update(controller.settings, **value.model_dump(), device=device)
+            if updated.bridge.enabled or updated.bridge.output.port:
+                validate_output(updated.bridge, updated.core)
             if updated.live.port != controller.settings.live.port:
                 from foxlive.cli import bind
 
@@ -294,20 +457,17 @@ def create_app(controller: Controller) -> FastAPI:
 
                 controller.queue(apply)
                 return {"restart": True, "url": f"http://{updated.live.host}:{updated.live.port}/"}
-            await controller.stop_source()
-            try:
-                save(controller.locations, updated)
-                controller.settings = updated
-                app.state.operator_language = updated.language
-                logging.getLogger().setLevel(updated.core.logging_level)
-                atomic_write(
-                    controller.locations.root / "running.json",
-                    json.dumps(
-                        {"host": updated.live.host, "port": updated.live.port, "path": "/"}
-                    ).encode(),
-                )
-            finally:
-                controller.start_source()
+            save(controller.locations, updated)
+            controller.settings = updated
+            await controller.application().configure(updated, controller.identity_confirmation())
+            app.state.operator_language = updated.language
+            logging.getLogger().setLevel(updated.core.logging_level)
+            atomic_write(
+                controller.locations.root / "running.json",
+                json.dumps(
+                    {"host": updated.live.host, "port": updated.live.port, "path": "/"}
+                ).encode(),
+            )
             return {"restart": False, "url": "/"}
 
     @app.post("/api/ops/backup")
@@ -397,11 +557,12 @@ def create_app(controller: Controller) -> FastAPI:
     @app.post("/api/ops/shutdown")
     async def shutdown() -> dict[str, bool]:
         # Shutdown does not change settings and must work with an explicit override too.
-        if controller.restarting:
-            raise ValueError("FoxSuite is restarting; wait for it to reconnect")
-        controller.pending, controller.restarting = lambda: None, True
-        asyncio.get_running_loop().call_later(0.3, controller.restart)
-        app.state.exit_requested = True
-        return {"stopping": True}
+        async with controller.lock:
+            if controller.restarting:
+                raise ValueError("FoxSuite is restarting; wait for it to reconnect")
+            controller.pending, controller.restarting = lambda: None, True
+            asyncio.get_running_loop().call_later(0.3, controller.restart)
+            app.state.exit_requested = True
+            return {"stopping": True}
 
     return app

@@ -1,9 +1,39 @@
 # Windows operations (M4 design and validation boundary)
 
 Normal operation uses a self-contained, per-user Windows installer and **FoxSuite** Start-menu
-shortcut. The desktop launcher opens a localhost browser setup/settings page around the accepted
-FoxLive application. It does not introduce another reader, parser, scorer or database schema.
+shortcut. After first-run setup, the desktop launcher opens the **FoxSuite Control Center** on
+localhost. FoxLive is the competition module and FoxBridge is the SPORTident module, both consuming
+the shared FoxCore ingest in one process. There is one FoxIdentServer reader, store and parser.
 The developer `foxsuite --config ...` CLI remains unchanged.
+
+## Control Center and runtime ownership (M4.1)
+
+The Control Center at `/` shows the receiver's current connection/reconnection/error state, input
+port, last message/error and TimeSync result; **Reconnect** closes the owned reader before reopening
+it. Missing/ambiguous saved USB identity keeps reception paused and directs the operator to Settings.
+**Open FoxLive** opens the existing desk at `/live`; its running event and processing error are shown
+separately from source health. The desk links back to FoxSuite.
+
+FoxBridge shows its actual worker/output state, endpoint, queue, last delivery and delivery counts.
+**Start/Stop** persists the desired startup state in normal desktop settings. Bridge Settings supports
+the virtual output COM port or absolute binary-capture path, baud, target, timezone, week counter and
+the existing explicit UID/SI-card and station/control mappings. Provision a virtual COM pair separately;
+FoxSuite does not install drivers. The output cannot be the input COM port, including case/device-prefix
+aliases. Sent means a driver write, not FjwW acknowledgement. Stopping unsubscribes Bridge before
+closing output, records interrupted/pending deliveries, and does not interrupt the receiver or FoxLive.
+Starting or restarting never automatically sends historical punches or retries uncertain writes.
+
+**System** provides settings, backups, recent diagnostics, version and the existing log location.
+**Restart FoxSuite** replaces the owned runtime/server inside the same process after closing source,
+TimeSync, Bridge output and SQLite. **Exit FoxSuite** closes those components and ends the process.
+Closing browser windows leaves the owned runtime running; reopening the Start-menu shortcut returns
+to the Control Center using the existing single-instance lock. There are no hidden module processes.
+Do not run a developer CLI serial reader alongside the installed runtime against the same receiver.
+
+With an explicit configuration override, settings/mappings remain read-only. Reconnect, restart, exit
+and temporary Bridge start/stop still work; temporary module controls do not rewrite the override or
+saved settings. A new process reloads the override's desired state. Details and validation boundaries
+are in [M4.1 runtime composition](M4_1_RUNTIME.md). This milestone does not start M6 visual redesign.
 
 ## Locations and precedence
 
@@ -89,13 +119,18 @@ fresh source checkout in PowerShell:
 .\packaging\windows\build.ps1
 ```
 
-No activated venv or globally installed Python package is required. The script finds `py -3` or a
-supported `python` on PATH (or accepts `-Python 'C:\path\to\python.exe'`), finds `ISCC.exe` on PATH,
-under Program Files or in the per-user LocalAppData Programs directory (or accepts
+No activated venv or globally installed Python package is required. A callable `python.exe` on PATH
+is sufficient when it reports Python 3.12+ and 64-bit. The script tries it first (or accepts
+`-Python 'C:\path\to\python.exe'`); `py.exe` is an optional fallback for discovering an interpreter,
+and the Python launcher is not a prerequisite. The selected interpreter creates the isolated venv.
+The script finds `ISCC.exe` on PATH, under Program Files or in the per-user LocalAppData Programs
+directory (or accepts
 `-Iscc 'C:\path\to\ISCC.exe'`), and gives an actionable error if either external tool is missing.
-It creates/reuses `.venv-windows-build\` in the checkout, upgrades pip *there*, installs the
-declared setuptools/wheel/build backend and `.[dev,ui-test,windows-build]` dependencies *there*,
-then uses only that interpreter for the build. On a later run it refreshes the dependencies; if
+It creates/reuses `.venv-windows-build\` in the checkout, upgrades pip *there*, and runs
+`python.exe -m pip install -e ".[dev]"` through that venv. The `dev` extra provides all Python build/test
+dependencies, including setuptools, wheel, build, PyInstaller and Playwright; Inno Setup 6 is the
+separately installed build tool. All Python build/test/package steps, including the frozen-app smoke
+runner, use `.venv-windows-build\Scripts\python.exe`. On a later run it refreshes the dependencies; if
 the venv is incomplete, exposes global packages or uses an unsupported Python, remove only
 `.venv-windows-build\` and rerun.
 The build host needs access to the required Python packages (Internet or configured local wheels);

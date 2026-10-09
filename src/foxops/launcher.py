@@ -77,13 +77,7 @@ async def serve(locations: Locations, override: Path | None, open_browser: bool)
         store = Store(settings.core.database_path)
         store.close()
         endpoint = bind(settings.live)
-        path = (
-            "/settings"
-            if settings.completed and controller.identity_confirmation()
-            else "/"
-            if settings.completed
-            else "/setup"
-        )
+        path = "/" if settings.completed else "/setup"
         atomic_write(
             locations.root / "running.json",
             json.dumps(
@@ -106,13 +100,7 @@ async def serve(locations: Locations, override: Path | None, open_browser: bool)
             while not server.started:
                 await asyncio.sleep(0.1)
             host = f"[{settings.live.host}]" if ":" in settings.live.host else settings.live.host
-            path = (
-                "/settings"
-                if settings.completed and controller.identity_confirmation()
-                else "/"
-                if settings.completed
-                else "/setup"
-            )
+            path = "/" if settings.completed else "/setup"
             url = f"http://{host}:{settings.live.port}{path}"
             log.info("FoxSuite desktop %s database=%s", url, settings.core.database_path)
             if open_browser:
@@ -163,7 +151,7 @@ def main() -> None:
             finally:
                 (locations.root / "running.json").unlink(missing_ok=True)
     except AlreadyRunning as exc:
-        # Reopening a Start-menu shortcut should reopen the desk, not require knowing its port.
+        # Reopening the shortcut returns to the suite's owned operational landing page.
         try:
             state = json.loads((locations.root / "running.json").read_text(encoding="utf-8"))
             if (

@@ -31,6 +31,10 @@ class BridgeService:
         self._last_state: tuple[bool, str] | None = None
         self._next_connect_at = 0.0
 
+    @property
+    def output_detail(self) -> str | None:
+        return self._last_state[1] if self._last_state else None
+
     def accept(self, punch: Punch) -> None:
         try:
             self.enqueue(punch)

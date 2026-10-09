@@ -3,9 +3,10 @@
 import asyncio
 import json
 import sqlite3
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -24,7 +25,7 @@ from foxcore.errors import error_message
 from foxcore.events import ConnectionEvent, TimeSyncEvent
 from foxcore.logging import SafeLogger
 from foxcore.persistence import Store
-from foxcore.serial import SerialTransport
+from foxcore.serial import SerialTransport, Transport
 from foxcore.service import IngestService
 from foxcore.timesync import TimeSyncService
 
@@ -138,44 +139,88 @@ class Runtime:
     # Desktop operations own an optional source lifecycle; developer defaults are unchanged.
     source_config: Config | None = None
     source_enabled: bool | None = None
+    source_health: dict[str, Any] = field(
+        default_factory=lambda: {
+            "state": "disconnected",
+            "last_message": None,
+            "last_error": None,
+            "timesync": None,
+        }
+    )
 
 
-async def source(runtime: Runtime, core: Config) -> None:
+async def source(runtime: Runtime, core: Config, transport: Transport | None = None) -> None:
     """Compose existing transport/TimeSync services, never another serial reader/parser."""
-    transport = SerialTransport(core.serial)
+    transport = transport or SerialTransport(core.serial)
+    runtime.source_health["state"] = "reconnecting"
 
     def record(event: TimeSyncEvent) -> None:
         runtime.store.diagnostic("timesync", json.dumps(asdict(event)))
+        runtime.source_health["timesync"] = asdict(event) | {
+            "recorded_at": datetime.now(UTC).isoformat()
+        }
         runtime.hub.publish("connection_changed", None, {"timesync": asdict(event)})
 
     sync = TimeSyncService(transport, core.time_sync, record)
 
     async def state(event: ConnectionEvent) -> None:
         runtime.source_connected = event.connected
+        runtime.source_health["state"] = "connected" if event.connected else "reconnecting"
+        if not event.connected and event.detail != "shutdown":
+            runtime.source_health["last_error"] = event.detail
         runtime.store.diagnostic("connection", json.dumps(asdict(event)))
         runtime.hub.publish("connection_changed", None, {"connection": asdict(event)})
         await sync.connection_changed(event)
 
     async def line(raw: bytes) -> None:
         runtime.ingest.ingest(raw, "serial:" + core.serial.port)
+        runtime.source_health["last_message"] = datetime.now(UTC).isoformat()
 
     try:
         async with asyncio.TaskGroup() as group:
             group.create_task(transport.run(line, state))
             group.create_task(sync.wait_failure())
     except Exception as exc:
-        runtime.live.failure = exc
-        log.warning("ERROR FoxLive source stopped: %s", error_message(exc))
+        runtime.source_health.update(state="error", last_error=error_message(exc))
+        log.warning("ERROR FoxCore source stopped: %s", error_message(exc))
         runtime.hub.publish("connection_changed", None, {"error": error_message(exc)})
     finally:
         runtime.source_connected = False
         try:
             await sync.stop()
         except Exception as exc:
-            runtime.live.failure = exc
-            log.warning("ERROR FoxLive TimeSync stopped: %s", error_message(exc))
+            runtime.source_health.update(state="error", last_error=error_message(exc))
+            log.warning("ERROR FoxCore TimeSync stopped: %s", error_message(exc))
         finally:
             await transport.disconnect()
+            if runtime.source_health["state"] != "error":
+                runtime.source_health["state"] = "disconnected"
+
+
+def create_runtime(
+    path: Path, core: Config, config: LiveConfig, *, tolerate_live_failure: bool = False
+) -> Runtime:
+    """Construct the existing shared store/ingest/Live services on their owner loop."""
+    store = Store(path)
+    try:
+        hub = Hub()
+        live = LiveService(LiveRepository(store), config.operator, hub.publish)
+        ingest = IngestService(store, minimum_unix_timestamp=core.minimum_unix_timestamp)
+        ingest.recover()
+        try:
+            live.recover()
+        except Exception as exc:
+            if not tolerate_live_failure:
+                raise
+            live.failure = exc
+            log.warning(
+                "ERROR FoxLive recovery failed; FoxCore remains available: %s", error_message(exc)
+            )
+        ingest.subscribe(live.accept)
+        return Runtime(store, ingest, live, hub)
+    except BaseException:
+        store.close()
+        raise
 
 
 def create_app(
@@ -183,6 +228,7 @@ def create_app(
     core: Config | None = None,
     config: LiveConfig | None = None,
     serial_enabled: bool = False,
+    runtime_factory: Callable[[], Runtime] | None = None,
 ) -> FastAPI:
     core, config = core or Config(), config or LiveConfig()
     runtime: Runtime | None = None
@@ -200,7 +246,10 @@ def create_app(
         owner = current()
         source_core = owner.source_config or core
         enabled = serial_enabled if owner.source_enabled is None else owner.source_enabled
-        return owner.live.snapshot(event_id) | {
+        state = owner.live.snapshot(event_id)
+        if not state["processing_error"] and owner.source_health["state"] == "error":
+            state["processing_error"] = owner.source_health["last_error"]
+        return state | {
             "application": {
                 "serial_enabled": enabled,
                 "source_port": source_core.serial.port,
@@ -214,21 +263,16 @@ def create_app(
         nonlocal runtime
         if serial_enabled and not core.serial.port:
             raise ValueError("Configure a FoxIdentServer serial port or use live run --no-serial")
-        store = Store(path)
         task: asyncio.Task[None] | None = None
         try:
-            hub = Hub()
-            live = LiveService(LiveRepository(store), config.operator, hub.publish)
-            ingest = IngestService(store, minimum_unix_timestamp=core.minimum_unix_timestamp)
-            ingest.recover()
-            live.recover()
-            ingest.subscribe(live.accept)
-            runtime = Runtime(store, ingest, live, hub)
+            if runtime_factory is not None and serial_enabled:
+                raise ValueError("An externally owned runtime must own its serial lifecycle")
+            runtime = runtime_factory() if runtime_factory else create_runtime(path, core, config)
             app.state.runtime = runtime
             log.info(
                 "FoxLive started database=%s version=%s serial=%s",
                 path,
-                store.version,
+                runtime.store.version,
                 serial_enabled,
             )
             if serial_enabled:
@@ -239,7 +283,8 @@ def create_app(
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
-            store.close()
+            if runtime is not None and runtime_factory is None:
+                runtime.store.close()
             runtime = None
             log.info("FoxLive stopped")
 

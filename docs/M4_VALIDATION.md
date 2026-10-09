@@ -84,10 +84,10 @@ The maintainer's next Windows run passed **253 tests**, skipped 15 platform/opti
 passed Ruff and strict mypy. The package build then stopped because the caller's Python did not
 have `setuptools.build_meta`; no frozen application or installer was built in that run.
 
-The Windows build script now creates/reuses `.venv-windows-build`, upgrades pip there, installs the
-declared setuptools/wheel/build tools and `.[dev,ui-test,windows-build]` extras there, and uses that
-interpreter for every existing gate. It finds a supported base Python and an Inno Setup 6 compiler
-before installing packages. The PEP 517 backend and wheel requirement are explicit in `pyproject.toml`.
+The Windows build script creates/reuses `.venv-windows-build`, upgrades pip there, installs all
+Python build/test tools with `.[dev]` there, and uses that interpreter for every existing gate.
+It finds a supported base Python and an Inno Setup 6 compiler before installing packages.
+The PEP 517 backend and wheel requirement are explicit in `pyproject.toml`.
 On Linux, PowerShell syntax and the interpreter/compiler helper behavior passed with PowerShell.
 The complete Python 3.12 suite passed **268 tests with all Chromium workflows enabled**. A clean
 Python 3.12 venv started without setuptools, upgraded pip, installed the declared backend and extras,
@@ -96,6 +96,25 @@ mypy and `build --no-isolation`. Its Linux PyInstaller bundle and installed/froz
 passed. All 518 reference firmware hashes match the baseline. One existing upstream Starlette
 warning remains visible. A native Windows rerun of `packaging\windows\build.ps1` is still needed to
 validate the frozen Windows application and installer. M3 physical acceptance remains pending.
+
+### Python discovery and dependency contract — 2026-10-09
+
+A callable 64-bit Python 3.12+ `python.exe` on PATH is sufficient. It takes precedence over the
+optional `py.exe` discovery fallback, which returns an actual interpreter path; that interpreter
+creates the isolated venv. Every subsequent Python build/test/package step runs through the venv's
+`Scripts\python.exe`, including the smoke runner that checks both frozen executables.
+The `dev` extra includes setuptools, wheel, build, PyInstaller and Playwright; no separate Python
+tool installation is required. Inno Setup 6 remains a separately installed external build tool.
+
+On Linux with PowerShell, **12 regression cases pass**, covering launcher absence/precedence,
+explicit selection, unsupported versions/32-bit interpreters, fallback validation, and command
+routing when creating/reusing the venv through direct/fallback discovery. External build commands
+are stubbed for those routing cases; they do not establish native Windows packaging acceptance.
+A fresh Python 3.12 venv started without setuptools and installed only `pip install -e ".[dev]"`.
+Its full default suite passes **359 tests, with 19 existing optional browser skips** and one upstream
+Starlette warning. The dependency check, PyInstaller module invocation and wheel/sdist
+`build --no-isolation` pass, as do Ruff lint/format and strict mypy for Linux and Windows targets.
+Native Windows installer execution remains pending.
 
 ## Original M4 implementation checks (Linux)
 

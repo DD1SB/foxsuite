@@ -1,5 +1,28 @@
 # Changelog
 
+## M4.1 — FoxSuite Control Center and runtime supervisor
+
+The installed product now opens a FoxSuite Control Center after setup, with the accepted FoxLive
+desk at `/live`. A single `FoxSuiteRuntime` owns the shared store/ingest, source/TimeSync lifecycle
+and optional Bridge subscription/worker in the existing process and asyncio loop. Hardware input
+is persisted once and fanned out to both modules. Receiver probes/reconnects await the previous
+reader's closure. Bridge stop/start leaves the receiver running and never backfills history.
+
+The EN/DE Control Center exposes receiver/module health, last message/error, delivery status, data,
+version, diagnostics, settings, backups, restart and exit. Existing settings now preserve Bridge
+configuration and expose its explicit mappings. Restart replaces the runtime within the same process;
+exit closes source, TimeSync, output, SQLite and HTTP. Source failures and module failures are reported
+separately. The single-instance lock, USB identity gate, raw-first semantics, delivery reservations,
+replay protection, backups and advanced CLI remain in use. M6 visual redesign has not started.
+Native Windows installer and physical acceptance remain separate validation requirements.
+
+Validation: 392 tests pass, including 20 Chromium workflows and 12 PowerShell bootstrap cases;
+58 runtime/operations/web regressions also pass on Python 3.13. Ruff lint/format, strict mypy
+for Linux and Windows targets, sdist/wheel and Linux frozen builds pass. Final installed/frozen
+smokes verify Control Center, same-process restart, Bridge lifecycle/output closure, offline assets,
+HTTP/WebSockets, M5 BEACON recovery, backup/restore, data copy and shutdown. See
+[M4.1 runtime composition and validation](docs/M4_1_RUNTIME.md).
+
 ## M5 correction — ARDF finish beacon station role
 
 - Added distinct FoxLive CONTROL/START/BEACON/FINISH roles. BEACON represents the
@@ -57,9 +80,10 @@ reference firmware hashes remain unchanged. One upstream TestClient warning rema
 
 ## M4 maintenance — Windows release-build bootstrap
 
-The Windows build script now selects a supported Python and Inno Setup compiler, creates/reuses an
-ignored local build venv, upgrades pip and installs setuptools, wheel, build and the declared
-dev/browser/PyInstaller extras inside it. Existing Python test, lint, type, package and frozen-app
+The Windows build script prefers a callable 64-bit Python 3.12+ `python.exe` on PATH; the Python
+launcher is an optional discovery fallback. The selected interpreter creates/reuses an ignored local
+build venv, upgrades pip and installs all Python build/test tools with `.[dev]`, including setuptools,
+wheel, build, Playwright and PyInstaller. Existing Python test, lint, type, package and frozen-app
 smoke gates use that venv; Inno Setup compiles the installer afterward. PEP 517 requirements are
 explicit in `pyproject.toml`. Missing external tools produce actionable errors. Global Python
 packages and venv activation are no longer prerequisites. Native Windows installer validation is

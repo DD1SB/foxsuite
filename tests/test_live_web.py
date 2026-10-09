@@ -381,9 +381,11 @@ def test_live_failure_never_conditions_raw_capture_on_scoring(
                     ).encode()
                 )
             async with asyncio.timeout(2):
-                while owner.live.failure is None or (
-                    layer == "derived" and owner.store.stats()["raw_events"] < 3
-                ):
+                while (
+                    owner.source_health["state"] != "error"
+                    if layer == "raw"
+                    else owner.live.failure is None
+                ) or (layer == "derived" and owner.store.stats()["raw_events"] < 3):
                     await asyncio.sleep(0.001)
 
         assert client.portal is not None

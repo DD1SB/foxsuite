@@ -258,7 +258,7 @@ def test_connection_probe_uses_raw_first_ingest_and_real_time_command(
 ) -> None:
     locations, settings = fixture(tmp_path)
     transport = FakeTransport()
-    monkeypatch.setattr("foxops.web.SerialTransport", lambda config: transport)
+    monkeypatch.setattr("foxops.runtime.SerialTransport", lambda config: transport)
     controller = Controller(locations, settings, lambda: None)
     with TestClient(create_app(controller), base_url="http://127.0.0.1") as client:
         assert client.portal is not None
@@ -294,7 +294,7 @@ def test_probe_errors_are_concise(
             await asyncio.Event().wait()
 
         monkeypatch.setattr(transport, "run", failed)
-    monkeypatch.setattr("foxops.web.SerialTransport", lambda config: transport)
+    monkeypatch.setattr("foxops.runtime.SerialTransport", lambda config: transport)
     controller = Controller(locations, settings, lambda: None)
     with TestClient(create_app(controller), base_url="http://127.0.0.1") as client:
         assert client.portal is not None
@@ -310,7 +310,7 @@ def test_settings_completion_restart_and_no_historical_reemission(
     monkeypatch.setattr(
         ports, "enumerate_ports", lambda: [ports.Port("COM3", Device(1, 2, "SER", "USB"))]
     )
-    monkeypatch.setattr("foxlive.web.SerialTransport", lambda config: FakeTransport())
+    monkeypatch.setattr("foxops.runtime.SerialTransport", lambda config: FakeTransport())
     controller = Controller(locations, settings, lambda: None)
     with TestClient(create_app(controller), base_url="http://127.0.0.1") as client:
         result = client.post("/api/ops/settings", json={"port": "COM3", "language": "de"})
@@ -379,6 +379,22 @@ def test_catalogs_complete_and_static_keys_exist(tmp_path: Path) -> None:
     assert set(i18n.ERRORS.values()) <= en.keys()
     keys = set(re.findall(r'data-t="([\w.]+)"', (assets / "settings.html").read_text()))
     keys |= set(re.findall(r"\bt\('([\w.]+)'", (assets / "settings.js").read_text()))
+    keys |= set(re.findall(r'data-t="([\w.]+)"', (assets / "control.html").read_text()))
+    keys |= set(re.findall(r"\bt\('([\w.]+)'(?=[,)])", (assets / "control.js").read_text()))
+    keys |= {
+        "state." + state
+        for state in (
+            "connected",
+            "disconnected",
+            "reconnecting",
+            "error",
+            "paused",
+            "testing",
+            "running",
+            "stopped",
+            "not_configured",
+        )
+    }
     assert keys <= en.keys()
     assert i18n.error_text("Backup is invalid", "de") == "Die Sicherung ist ungültig"
     assert (
@@ -427,7 +443,7 @@ def test_reidentified_usb_pauses_source_instead_of_opening_wrong_port(
         calls.append(config.port)
         return FakeTransport()
 
-    monkeypatch.setattr("foxlive.web.SerialTransport", transport)
+    monkeypatch.setattr("foxops.runtime.SerialTransport", transport)
     monkeypatch.setattr(
         ports,
         "enumerate_ports",

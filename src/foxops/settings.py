@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
+from foxbridge.config import BridgeConfig, load_bridge_config
 from foxcore.config import Config, load_config
 from foxlive.config import LiveConfig, load_live_config
 
@@ -72,6 +73,7 @@ class Settings:
     language: Literal["en", "de"] = "en"
     device: Device = field(default_factory=Device)
     override: bool = False
+    bridge: BridgeConfig = field(default_factory=BridgeConfig)
 
     def __post_init__(self) -> None:
         if type(self.completed) is not bool or type(self.override) is not bool:
@@ -84,6 +86,13 @@ class Settings:
             raise ValueError("Desktop operations must bind localhost; use the advanced CLI for LAN")
         if self.language not in {"en", "de"}:
             raise ValueError("Choose English or Deutsch")
+        if self.bridge.output.type == "file" and not self.bridge.output.path.is_absolute():
+            raise ValueError("Desktop bridge capture path must be absolute")
+        if (
+            self.bridge.output.type == "file"
+            and self.bridge.output.path.resolve() == self.core.database_path.resolve()
+        ):
+            raise ValueError("Bridge capture file must differ from the database")
 
 
 def load(locations: Locations, override: Path | None = None) -> Settings:
@@ -98,6 +107,7 @@ def load(locations: Locations, override: Path | None = None) -> Settings:
             desk.get("completed", False),
             desk.get("language", "en"),
             Device(**saved.get("device", {})),
+            bridge=load_bridge_config(locations.settings),
         )
     if override is not None:
         settings = replace(
@@ -106,6 +116,7 @@ def load(locations: Locations, override: Path | None = None) -> Settings:
             live=load_live_config(override),
             completed=True,
             override=True,
+            bridge=load_bridge_config(override),
         )
     return settings
 
@@ -120,6 +131,17 @@ def encode(settings: Settings) -> bytes:
         "validation": {"minimum_unix_timestamp": settings.core.minimum_unix_timestamp},
         "live": asdict(settings.live),
         "device": asdict(settings.device),
+        "bridge": {
+            "enabled": settings.bridge.enabled,
+            "target": settings.bridge.target,
+            "queue_capacity": settings.bridge.queue_capacity,
+        },
+        "bridge.output": {
+            key: str(value) if isinstance(value, Path) else value
+            for key, value in asdict(settings.bridge.output).items()
+            if key != "path" or settings.bridge.output.path.is_absolute()
+        },
+        "bridge.sportident": asdict(settings.bridge.sportident),
     }
     # JSON string escaping is a valid subset of TOML basic-string escaping for these values.
     return "\n".join(

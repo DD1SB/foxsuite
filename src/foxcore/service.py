@@ -26,6 +26,10 @@ class IngestService:
     def subscribe(self, callback: Callable[[Punch], None]) -> None:
         self.subscribers.append(callback)
 
+    def unsubscribe(self, callback: Callable[[Punch], None]) -> None:
+        if callback in self.subscribers:
+            self.subscribers.remove(callback)
+
     def ingest(
         self,
         raw: bytes,

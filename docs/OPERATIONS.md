@@ -5,8 +5,11 @@
 The normal M4 path is the self-contained Windows installer and **FoxSuite** Start-menu shortcut.
 No Python, Git, PowerShell, pip or TOML editing is needed on the event PC. First launch opens the
 EN/DE setup wizard: select the described USB/COM port, test connection, accept the data folder,
-finish and use FoxLive. **System → Settings** opens graphical configuration, backups and safe
-shutdown. Browser/baud/reconnect/TimeSync interval/log detail are under Advanced. A test pauses the
+finish and enter the **FoxSuite Control Center**. **Open FoxLive** opens the competition desk.
+The Control Center shows the shared receiver, TimeSync, FoxCore and module status; it provides
+reconnect, FoxBridge start/stop, Settings, backups, diagnostics, restart and **Exit FoxSuite**.
+FoxBridge Settings includes output configuration and explicit UID/SI-card and station/control mappings.
+Browser/baud/reconnect/TimeSync interval/log detail are under Advanced. A test pauses the
 existing reader briefly and retains all received bytes using FoxCore. Write success does not prove
 firmware identity or acknowledgement. A saved USB VID/PID/serial on a changed COM port is offered
 for confirmation; missing/ambiguous identity pauses reception until corrected. Without reliable
@@ -16,7 +19,10 @@ Normal data is `%LOCALAPPDATA%\FoxSuite\data\foxsuite.db`; settings are in
 `config\settings.toml`, rotating logs in `logs`, backups in `backups` below the same user root.
 Installation is separately `%LOCALAPPDATA%\Programs\FoxSuite`. Upgrades/uninstall do not remove
 competition data. Paths are absolute and independent of the Start-menu working directory.
-Closing a browser does **not** stop the application; use **Settings → Shut down FoxSuite**.
+Closing a browser does **not** stop the application; use **Control Center → Exit FoxSuite**.
+One process owns one receiver reader/ingest/store; FoxLive and FoxBridge consume its canonical punches.
+Bridge stop does not stop reception or FoxLive. Runtime restart closes and recreates all components
+inside the same process; no module process survives exit. See [M4.1 runtime ownership](M4_1_RUNTIME.md).
 M4 Windows release-build/clean-machine validation remains pending; build recipes and the exact
 acceptance checklist are in [Windows operations](WINDOWS.md). M3 physical acceptance also remains
 pending. No new hardware acceptance is claimed by Linux tests.
@@ -26,8 +32,8 @@ pending. No new hardware acceptance is claimed by Linux tests.
 Install Python 3.12+ and run in PowerShell from the repository:
 
 ```powershell
-py -3.12 -m venv .venv
-.venv\Scripts\python -m pip install -e ".[dev]"
+python.exe -m venv .venv
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
 Copy-Item config\foxsuite.example.toml config\foxsuite.toml
 .venv\Scripts\foxsuite --config config\foxsuite.toml run
 ```

@@ -29,6 +29,11 @@ ERRORS = {
     "Native folder selection is available in the Windows desktop app; otherwise enter an absolute folder path": "error.browse",
     "FoxSuite is already running for this user": "error.busy",
     "Select a FoxIdentServer port before finishing setup": "error.port",
+    "Desktop bridge capture path must be absolute": "error.bridge_path",
+    "Bridge capture file must differ from the database": "error.capture_database",
+    "Configure FoxBridge output port in [bridge.output].port": "error.bridge_port",
+    "FoxBridge output port must differ from the FoxIdentServer input port": "error.bridge_same_port",
+    "Complete first-run setup before starting FoxBridge": "error.bridge_setup",
 }
 
 

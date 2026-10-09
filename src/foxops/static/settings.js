@@ -10,7 +10,7 @@ function render() {
   document.querySelectorAll('[data-t]').forEach(node=>node.textContent=t(node.dataset.t));
   $('title').textContent=t(state.completed?'settings':'setup');
   document.querySelectorAll('[data-step]').forEach(node=>node.hidden=!state.completed&&Number(node.dataset.step)!==step);
-  $('normal').hidden=!state.completed; $('steps').hidden=state.completed;
+  $('normal').hidden=!state.completed; $('bridge').hidden=!state.completed; $('steps').hidden=state.completed;
   $('steps').textContent=t('step',{number:step+1,total:5}); $('previous').hidden=state.completed||step===0;
   $('next').hidden=state.completed||step===4; $('finish').hidden=!state.completed&&step!==4;
   $('finish').textContent=t(state.completed?'save':'finish'); $('override').hidden=!state.override;
@@ -35,6 +35,16 @@ async function reconnect(url='/settings'){
   for(let attempt=0;attempt<40;attempt++){await new Promise(resolve=>setTimeout(resolve,500));try{const response=await fetch(url,{cache:'no-store'});if(response.ok&&attempt>2){location.href=url;return;}}catch{/* Owned server is restarting. */}}
   $('message').textContent=t('restart_help');
 }
+async function mappings(){
+  const list=await api('bridge/mappings');$('bridge-mappings').replaceChildren();
+  for(const [kind,items] of Object.entries(list))for(const item of items){
+    const row=document.createElement('p'),label=document.createElement('span'),remove=document.createElement('button');
+    label.textContent=kind==='uids'?item.uid+' → '+item.card_number+' ':item.station_id+' → '+item.control_code+' ('+item.role+') ';
+    remove.type='button';remove.dataset.t='remove_mapping';remove.textContent=t('remove_mapping');
+    remove.onclick=action(async()=>{await api('bridge/mappings/'+(kind==='uids'?'uid':'station')+'/remove',kind==='uids'?{uid:item.uid}:{station_id:item.station_id});await mappings();});
+    row.append(label,remove);$('bridge-mappings').append(row);
+  }
+}
 async function start(){
   catalogs=Object.fromEntries(await Promise.all(['en','de'].map(async lang=>[lang,await(await fetch('/ops/static/'+lang+'.json')).json()])));
   state=await api('settings');if(!localStorage.getItem('foxlive.language'))language=state.language;preference();render();
@@ -44,6 +54,8 @@ async function start(){
   if(!state.completed){try{const saved=JSON.parse(sessionStorage.getItem('foxops.setup')||'null');if(saved)for(const id of fields)if(saved[id])$(id).value=saved[id];}catch{/* Optional browser storage. */}}
   if(state.last_operation&&state.last_operation!=='ok')showError(new Error(state.last_operation));
   await backups();
+  const bridge=await api('bridge');$('bridge-enabled').checked=bridge.enabled;for(const [id,key] of [['bridge-target','target'],['bridge-type','output_type'],['bridge-port','port'],['bridge-baud','baud_rate'],['bridge-path','path'],['bridge-timezone','timezone'],['bridge-week','week_counter']])$(id).value=bridge[key];
+  $('bridge-form').onsubmit=action(async()=>{await api('bridge',{enabled:$('bridge-enabled').checked,target:$('bridge-target').value,output_type:$('bridge-type').value,port:$('bridge-port').value,baud_rate:Number($('bridge-baud').value),path:$('bridge-path').value,timezone:$('bridge-timezone').value,week_counter:Number($('bridge-week').value)});$('message').textContent=t('bridge_saved');});
   $('language').onchange=()=>{language=$('language').value;preference();render();};
   $('previous').onclick=()=>{step=Math.max(0,step-1);render();};
   $('next').onclick=()=>{if(step===1&&!port()){showError(new Error(t('choose_port')));return;}step=Math.min(4,step+1);render();};
@@ -59,6 +71,9 @@ async function start(){
   $('import-backup').onclick=action(async()=>{const file=$('import-file').files[0];if(!file)throw new Error(t('choose_backup'));const response=await fetch('/api/ops/import',{method:'POST',headers:{'Content-Type':'application/octet-stream','Accept-Language':language},body:file});const result=await response.json();if(!response.ok)throw new Error(result.detail);await backups();$('backups').value=result.name;$('backups').onchange();});
   $('restore').onclick=action(async()=>{if(!confirm(t('confirm_restore')))return;await api('restore',{name:$('backups').value,confirmed:true});await reconnect();});
   $('shutdown').onclick=action(async()=>{if(!confirm(t('confirm_shutdown')))return;await api('shutdown',{});$('message').textContent=t('stopped');document.querySelectorAll('button').forEach(node=>node.hidden=true);});
+  await mappings();
+  $('uid-map-form').onsubmit=action(async()=>{await api('bridge/mappings/uid',{uid:$('mapping-uid').value,card_number:Number($('mapping-card').value)});$('uid-map-form').reset();await mappings();});
+  $('station-map-form').onsubmit=action(async()=>{await api('bridge/mappings/station',{station_id:Number($('mapping-station').value),control_code:Number($('mapping-control').value),role:$('mapping-role').value});$('station-map-form').reset();await mappings();});
   ready=true;render();
 }
 start().catch(showError);

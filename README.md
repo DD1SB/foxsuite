@@ -13,6 +13,8 @@ FoxLive: M3 implemented and automatically tested; physical hardware/manual valid
 
 M4 adds a desktop operations layer and Windows release recipes; clean-Windows installer/USB
 acceptance remains pending. M3 physical acceptance is not implied by M4 automated checks.
+M4.1 adds the FoxSuite Control Center and a single shared runtime for FoxCore, FoxLive and FoxBridge.
+It is an operational milestone; M6 visual redesign has not started.
 
 M5 adds DESFire capture import/simulation, offline recovery, evidence reconciliation,
 review and audited jury decisions. Software validation uses simulated/imported tag data;
@@ -32,15 +34,19 @@ a sibling consumer of FoxCore, not a FoxBridge client. No cloud, telemetry, CDN 
 ## Installation and configuration
 
 Normal Windows operation: install the self-contained FoxSuite installer, launch **FoxSuite** from
-Start, complete EN/DE setup (COM selection/test/data location), and FoxLive opens in your browser.
-No Python/Git/pip/TOML editing is needed. **System → Settings** manages connection, data folder,
-backup/restore and safe shutdown. User data lives under `%LOCALAPPDATA%\FoxSuite`, separately from
+Start and complete EN/DE setup (COM selection/test/data location). The **FoxSuite Control Center**
+opens in your browser with receiver/TimeSync, FoxCore, FoxLive and FoxBridge status. **Open FoxLive**
+opens the competition desk. Bridge settings and explicit mappings, reconnect, backups, diagnostics,
+restart and **Exit FoxSuite** are available from the Control Center. No Python/Git/pip/TOML editing
+is needed. User data lives under `%LOCALAPPDATA%\FoxSuite`, separately from
 installation/upgrades. See [Windows deployment and validation](docs/WINDOWS.md) and
 [operations](docs/OPERATIONS.md). Windows installer production/acceptance still requires a Windows
 release build; the repository includes PyInstaller/Inno Setup recipes, not a claimed tested installer.
-On a Windows release machine with Python 3.12+ and Inno Setup 6, run
+On a Windows release machine with 64-bit Python 3.12+ (`python.exe` on PATH) and Inno Setup 6, run
 `.\packaging\windows\build.ps1` from a source checkout. It creates its own local build venv and
-installs the declared build/test dependencies; see [one-command build setup](docs/WINDOWS.md#packaging-and-evidence).
+installs all Python build/test dependencies with `.[dev]`. The Python launcher is optional;
+see [one-command build setup](docs/WINDOWS.md#packaging-and-evidence).
+The inspected and resulting runtime compositions are recorded in [M4.1 runtime ownership](docs/M4_1_RUNTIME.md).
 
 ### Developer installation (preserved)
 
